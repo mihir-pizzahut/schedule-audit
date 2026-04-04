@@ -58,6 +58,47 @@ const LS = {
 
 const gid = () => "r" + Date.now() + Math.random().toString(36).slice(2, 5);
 
+// Compress image to reduce API token usage
+const compressImage = (b64, maxW = 1200, quality = 0.6) => new Promise((resolve) => {
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    let w = img.width, h = img.height;
+    if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    resolve(canvas.toDataURL("image/jpeg", quality));
+  };
+  img.onerror = () => resolve(b64);
+  img.src = b64;
+});
+
+// Delay helper for rate limit retry
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+// API call with auto-retry on rate limit (429)
+const apiFetch = async (body, apiKey, setStep, retries = 3) => {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return await res.json();
+    if (res.status === 401) throw new Error("Invalid API key. Go to Settings (⚙️) and update your key.");
+    if (res.status === 429 && attempt < retries - 1) {
+      const wait = Math.min(30 + attempt * 20, 60);
+      setStep(`Rate limited — waiting ${wait}s before retry (${attempt + 1}/${retries})...`);
+      await delay(wait * 1000);
+      setStep("Retrying...");
+      continue;
+    }
+    const errBody = await res.text();
+    throw new Error(`API ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+};
+
 const C = {
   bg: "#06080c", card: "#0e1219", card2: "#151c28", border: "#1c2536",
   accent: "#3b8bff", text: "#c8d3e5", dim: "#3e4f6a",
@@ -141,23 +182,28 @@ function App() {
       const activeRules = rules.filter(r => r.on).map(r => `[${r.cat}] ${r.rule}`).join("\n");
       const imageContents = [];
       const storeNames = [];
-      STORES.forEach((st, si) => {
-        if (!sel[si]) return;
-        (imgs[st] || []).forEach((img, idx) => {
-          const d = img.b64.split(",")[1];
-          const mt = img.b64.match(/data:(.*?);/)?.[1] || "image/png";
-          imageContents.push({ type: "image", source: { type: "base64", media_type: mt, data: d } });
+
+      // Compress all images first to reduce token usage
+      setStep("Compressing images...");
+      for (const [si, st] of STORES.entries()) {
+        if (!sel[si]) continue;
+        const stImgs = imgs[st] || [];
+        if (stImgs.length === 0) continue;
+        storeNames.push(st);
+        for (let idx = 0; idx < stImgs.length; idx++) {
+          const compressed = await compressImage(stImgs[idx].b64, 1200, 0.55);
+          const d = compressed.split(",")[1];
+          imageContents.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
           imageContents.push({ type: "text", text: `[${st} schedule - image ${idx + 1}]` });
-        });
-        if ((imgs[st]?.length || 0) > 0) storeNames.push(st);
-      });
+        }
+      }
       const dealContents = [];
-      dealImgs.forEach((img, idx) => {
-        const d = img.b64.split(",")[1];
-        const mt = img.b64.match(/data:(.*?);/)?.[1] || "image/png";
-        dealContents.push({ type: "image", source: { type: "base64", media_type: mt, data: d } });
-        dealContents.push({ type: "text", text: `[Deal screenshot ${idx + 1}: ${img.name}]` });
-      });
+      for (let idx = 0; idx < dealImgs.length; idx++) {
+        const compressed = await compressImage(dealImgs[idx].b64, 1000, 0.5);
+        const d = compressed.split(",")[1];
+        dealContents.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
+        dealContents.push({ type: "text", text: `[Deal screenshot ${idx + 1}: ${dealImgs[idx].name}]` });
+      }
 
       if (storeNames.length === 0) { setResult({ error: "Upload at least one schedule screenshot first." }); setLoading(false); return; }
 
@@ -165,24 +211,14 @@ function App() {
       setStep("Checking Calgary weather, holidays, sports & payments...");
       let ext = "";
       try {
-        const cr = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514", max_tokens: 1000,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            messages: [{ role: "user", content: `Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather forecast - any snow/extreme cold below -15C?\n2) Alberta stat holidays that week or adjacent creating long weekend?\n3) Major Calgary/Alberta sports events (Flames, Stampeders, national)?\n4) Government benefit payment dates (GST credit, CCB, Alberta)?\n5) Any notable Calgary events?\nJust facts and dates, be concise.` }],
-          }),
-        });
-        if (!cr.ok) {
-          const errBody = await cr.text();
-          if (cr.status === 401) { setResult({ error: "Invalid API key. Go to Settings (⚙️) and update your Anthropic API key." }); setLoading(false); return; }
-          throw new Error(`API ${cr.status}: ${errBody.slice(0,200)}`);
-        }
-        const cd = await cr.json();
+        const cd = await apiFetch({
+          model: "claude-sonnet-4-20250514", max_tokens: 1000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: `Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather forecast - any snow/extreme cold below -15C?\n2) Alberta stat holidays that week or adjacent creating long weekend?\n3) Major Calgary/Alberta sports events (Flames, Stampeders, national)?\n4) Government benefit payment dates (GST credit, CCB, Alberta)?\n5) Any notable Calgary events?\nJust facts and dates, be concise.` }],
+        }, apiKey, setStep);
         ext = cd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n") || "";
       } catch (err) {
-        if (result?.error) return;
+        if (err.message.includes("Invalid API key")) { setResult({ error: err.message }); setLoading(false); return; }
         ext = "External context unavailable: " + err.message;
       }
 
@@ -242,19 +278,11 @@ CRITICAL INSTRUCTIONS:
 - Worst problems first in findings
 - If you cannot read a screenshot, add a warning finding`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 4000, system: sys,
-          messages: [{ role: "user", content: [...imageContents, ...dealContents, { type: "text", text: `Audit these schedules for week of ${weekOf}. Return ONLY the JSON.` }] }],
-        }),
-      });
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(`API ${res.status}: ${errBody.slice(0,200)}`);
-      }
-      const rd = await res.json();
+      setStep("AI reading your schedules...");
+      const rd = await apiFetch({
+        model: "claude-sonnet-4-20250514", max_tokens: 4000, system: sys,
+        messages: [{ role: "user", content: [...imageContents, ...dealContents, { type: "text", text: `Audit these schedules for week of ${weekOf}. Return ONLY the JSON.` }] }],
+      }, apiKey, setStep);
       const txt = rd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("") || "";
       const clean = txt.replace(/```json|```/g, "").trim();
       try { setResult({ data: JSON.parse(clean) }); }
@@ -303,7 +331,10 @@ CRITICAL INSTRUCTIONS:
         </div>
 
         <div style={{ marginTop: 16, padding: "10px 12px", background: C.card2, borderRadius: 8, fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
-          <strong style={{ color: C.text }}>How it works:</strong> This tool sends your schedule screenshots to Claude AI via the Anthropic API. It also searches the web for Calgary weather, holidays, sports events, and government payment dates to factor into the audit. All processing happens between your browser and the API directly.
+          <strong style={{ color: C.text }}>How it works:</strong> This tool sends your schedule screenshots to Claude AI via the Anthropic API. Images are auto-compressed to reduce token usage. It also searches the web for Calgary weather, holidays, sports events, and payment dates. All processing happens between your browser and the API directly.
+        </div>
+        <div style={{ marginTop: 8, padding: "10px 12px", background: C.yellowBg, border: `1px solid ${C.yellowBdr}`, borderRadius: 8, fontSize: 10, color: "#fde68a", lineHeight: 1.5 }}>
+          <strong>Rate limit tip:</strong> If you hit rate limits (429 errors), the tool auto-retries with a wait. To avoid this, audit 2–3 stores at a time instead of all 5 at once.
         </div>
 
         <button onClick={() => setShowSettings(false)} style={{ width: "100%", marginTop: 16, padding: "10px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>

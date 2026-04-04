@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#06080c">
+<meta name="description" content="Pizza Hut Schedule Audit Tool — AC Region Calgary">
+<title>Schedule Audit · AC Region</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍕</text></svg>">
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiU2NoZWR1bGUgQXVkaXQiLCJzaG9ydF9uYW1lIjoiQXVkaXQiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzA2MDgwYyIsInRoZW1lX2NvbG9yIjoiIzA2MDgwYyJ9">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { background: #06080c; font-family: 'SF Mono','Fira Code','Cascadia Code','JetBrains Mono',monospace; overflow-x: hidden; }
+  #root { min-height: 100vh; min-height: 100dvh; }
+  input, select, textarea, button { font-family: inherit; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #0e1219; }
+  ::-webkit-scrollbar-thumb { background: #1c2536; border-radius: 4px; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+  @keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+  .fade-in { animation: slideUp 0.3s ease-out; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
+
+const STORES = ["McKnight", "Hanson Ranch", "Montgomery", "Sarcee", "Crowfoot"];
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const DEFAULT_RULES = [
+  { id: "r1", cat: "Staffing", rule: "Weekdays: 1 Shift Manager OR Salaried Employee in AM, 1 in PM. If salaried employee is scheduled, no separate SM needed" },
+  { id: "r2", cat: "Staffing", rule: "Weekdays: Minimum 1 Cook scheduled in PM shift" },
+  { id: "r3", cat: "Staffing", rule: "Weekends (Fri/Sat/Sun): Multiple staff per shift expected" },
+  { id: "r4", cat: "Staffing", rule: "Minimum 2 people in morning shift (dough is made by production, SM, or salaried — not a separate role)" },
+  { id: "r5", cat: "Overlap", rule: "Max 30 min overlap between Shift Managers/Salaried employees — flag if more" },
+  { id: "r6", cat: "Coverage", rule: "Majority of scheduled hours must fall within store open hours" },
+  { id: "r7", cat: "Coverage", rule: "Peak hours 4 PM–8 PM must have highest staffing density" },
+  { id: "r8", cat: "Holiday", rule: "Stat holiday weekends: Thu before & Mon after are BUSY, Fri/Sat/Sun are SLOW" },
+  { id: "r9", cat: "Weather", rule: "Snow or extreme cold in Calgary = BUSY, need extra staff" },
+  { id: "r10", cat: "Events", rule: "Calgary/Alberta sports events or special days = need extra staff" },
+  { id: "r11", cat: "Events", rule: "Government benefit payment days (Alberta) = BUSY" },
+  { id: "r12", cat: "Deals", rule: "Active deals (BOGO, 5.5.5, etc.) = BUSY, need more staff" },
+];
+
+const LS = {
+  get: (k, d) => { try { const v = localStorage.getItem("sa_" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem("sa_" + k, JSON.stringify(v)); } catch {} },
+};
+
+const gid = () => "r" + Date.now() + Math.random().toString(36).slice(2, 5);
+
+const C = {
+  bg: "#06080c", card: "#0e1219", card2: "#151c28", border: "#1c2536",
+  accent: "#3b8bff", text: "#c8d3e5", dim: "#3e4f6a",
+  red: "#ef4444", yellow: "#eab308", green: "#22c55e",
+  redBg: "#1c0a0a", yellowBg: "#1c1808", greenBg: "#081c0e",
+  redBdr: "#7f1d1d", yellowBdr: "#713f12", greenBdr: "#14532d",
+};
+const gradeC = { A: C.green, B: "#4ade80", C: C.yellow, D: "#fb923c", F: C.red };
+const statusC = { ok: C.green, watch: C.yellow, alert: C.red };
+const dayC = { green: C.green, yellow: C.yellow, red: C.red };
+
+function App() {
+  const [view, setView] = useState("setup");
+  const [tab, setTab] = useState("schedules");
+  const [imgs, setImgs] = useState({});
+  const [dealImgs, setDealImgs] = useState([]);
+  const [dealNotes, setDealNotes] = useState(LS.get("dealNotes", ""));
+  const [rules, setRules] = useState(LS.get("rules", DEFAULT_RULES.map(r => ({ ...r, on: true }))));
+  const [newCat, setNewCat] = useState("Custom");
+  const [newRule, setNewRule] = useState("");
+  const [weekOf, setWeekOf] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - d.getDay() + 1);
+    return d.toISOString().split("T")[0];
+  });
+  const [sel, setSel] = useState(STORES.map(() => true));
+  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState("");
+  const [result, setResult] = useState(null);
+  const [expandedStore, setExpandedStore] = useState(null);
+  const [apiKey, setApiKey] = useState(LS.get("apiKey", ""));
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const refs = useRef({});
+  const dealRef = useRef(null);
+
+  // Persist
+  useEffect(() => { LS.set("rules", rules); }, [rules]);
+  useEffect(() => { LS.set("dealNotes", dealNotes); }, [dealNotes]);
+  useEffect(() => { LS.set("apiKey", apiKey); }, [apiKey]);
+
+  const upload = (store, e) => {
+    Array.from(e.target.files).forEach(f => {
+      const r = new FileReader();
+      r.onload = ev => setImgs(p => ({ ...p, [store]: [...(p[store] || []), { b64: ev.target.result, name: f.name }] }));
+      r.readAsDataURL(f);
+    });
+    e.target.value = "";
+  };
+  const uploadDeal = e => {
+    Array.from(e.target.files).forEach(f => {
+      const r = new FileReader();
+      r.onload = ev => setDealImgs(p => [...p, { b64: ev.target.result, name: f.name }]);
+      r.readAsDataURL(f);
+    });
+    e.target.value = "";
+  };
+  const pickFile = (store) => {
+    if (!refs.current[store]) {
+      refs.current[store] = document.createElement("input");
+      refs.current[store].type = "file"; refs.current[store].accept = "image/*"; refs.current[store].multiple = true;
+      refs.current[store].addEventListener("change", e => upload(store, e));
+    }
+    refs.current[store].click();
+  };
+  const pickDeal = () => {
+    if (!dealRef.current) {
+      dealRef.current = document.createElement("input");
+      dealRef.current.type = "file"; dealRef.current.accept = "image/*"; dealRef.current.multiple = true;
+      dealRef.current.addEventListener("change", uploadDeal);
+    }
+    dealRef.current.click();
+  };
+
+  const imgCount = STORES.reduce((s, st, i) => s + (sel[i] ? (imgs[st]?.length || 0) : 0), 0);
+
+  const runAudit = async () => {
+    if (!apiKey) { setShowSettings(true); return; }
+    setLoading(true); setResult(null); setView("results");
+
+    try {
+      const activeRules = rules.filter(r => r.on).map(r => `[${r.cat}] ${r.rule}`).join("\n");
+      const imageContents = [];
+      const storeNames = [];
+      STORES.forEach((st, si) => {
+        if (!sel[si]) return;
+        (imgs[st] || []).forEach((img, idx) => {
+          const d = img.b64.split(",")[1];
+          const mt = img.b64.match(/data:(.*?);/)?.[1] || "image/png";
+          imageContents.push({ type: "image", source: { type: "base64", media_type: mt, data: d } });
+          imageContents.push({ type: "text", text: `[${st} schedule - image ${idx + 1}]` });
+        });
+        if ((imgs[st]?.length || 0) > 0) storeNames.push(st);
+      });
+      const dealContents = [];
+      dealImgs.forEach((img, idx) => {
+        const d = img.b64.split(",")[1];
+        const mt = img.b64.match(/data:(.*?);/)?.[1] || "image/png";
+        dealContents.push({ type: "image", source: { type: "base64", media_type: mt, data: d } });
+        dealContents.push({ type: "text", text: `[Deal screenshot ${idx + 1}: ${img.name}]` });
+      });
+
+      if (storeNames.length === 0) { setResult({ error: "Upload at least one schedule screenshot first." }); setLoading(false); return; }
+
+      // Step 1: External context
+      setStep("Checking Calgary weather, holidays, sports & payments...");
+      let ext = "";
+      try {
+        const cr = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514", max_tokens: 1000,
+            tools: [{ type: "web_search_20250305", name: "web_search" }],
+            messages: [{ role: "user", content: `Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather forecast - any snow/extreme cold below -15C?\n2) Alberta stat holidays that week or adjacent creating long weekend?\n3) Major Calgary/Alberta sports events (Flames, Stampeders, national)?\n4) Government benefit payment dates (GST credit, CCB, Alberta)?\n5) Any notable Calgary events?\nJust facts and dates, be concise.` }],
+          }),
+        });
+        if (!cr.ok) {
+          const errBody = await cr.text();
+          if (cr.status === 401) { setResult({ error: "Invalid API key. Go to Settings (⚙️) and update your Anthropic API key." }); setLoading(false); return; }
+          throw new Error(`API ${cr.status}: ${errBody.slice(0,200)}`);
+        }
+        const cd = await cr.json();
+        ext = cd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n") || "";
+      } catch (err) {
+        if (result?.error) return;
+        ext = "External context unavailable: " + err.message;
+      }
+
+      // Step 2: Schedule analysis
+      setStep("AI reading your schedules...");
+      const sys = `You are a Pizza Hut scheduling audit AI for Calgary, Alberta. Analyze schedule screenshots and return a VISUAL AUDIT DASHBOARD as JSON.
+
+RULES:
+${activeRules}
+
+EXTERNAL CONTEXT (week of ${weekOf}):
+${ext}
+
+${dealNotes ? `DEAL NOTES: ${dealNotes}` : ""}
+
+STORES: ${storeNames.join(", ")}
+
+KEY CONTEXT: Salaried employees (salary staff) cover the Shift Manager requirement. If a salaried employee is scheduled on a shift, do NOT flag that shift as missing a Shift Manager — it is covered. Doughmaster is NOT a separate job title — dough is made by production staff, shift managers, or salaried employees. The rule is simply that at least 2 people must be scheduled in the morning shift so dough can be made.
+
+RESPOND ONLY WITH THIS EXACT JSON (no markdown, no backticks, no extra text):
+{
+  "alerts": [
+    { "level": "critical|warning", "icon": "emoji", "title": "Short bold title max 8 words", "detail": "1 line max 12 words", "store": "StoreName or ALL" }
+  ],
+  "external": [
+    { "type": "weather|holiday|sports|payments|deals", "icon": "emoji", "label": "2-3 word label", "status": "ok|watch|alert", "note": "8 words max" }
+  ],
+  "stores": [
+    {
+      "name": "StoreName",
+      "grade": "A|B|C|D|F",
+      "criticals": 0,
+      "warnings": 0,
+      "passes": 0,
+      "dayGrid": {
+        "Mon": "green|yellow|red",
+        "Tue": "green|yellow|red",
+        "Wed": "green|yellow|red",
+        "Thu": "green|yellow|red",
+        "Fri": "green|yellow|red",
+        "Sat": "green|yellow|red",
+        "Sun": "green|yellow|red"
+      },
+      "findings": [
+        { "sev": "critical|warning|pass", "day": "Mon|Tue|Wed|Thu|Fri|Sat|Sun|General", "msg": "Max 12 words", "fix": "Max 10 words or empty string" }
+      ]
+    }
+  ],
+  "summary": "1 sentence max 20 words"
+}
+
+CRITICAL INSTRUCTIONS:
+- "alerts" = ONLY critical and warning items globally across all stores. Sorted critical first. RED FLAGS first.
+- Keep ALL text extremely short. Visual dashboard, not a report.
+- dayGrid: red=critical issue, yellow=minor issue, green=good
+- Grade: A=perfect, B=minor, C=needs fixes, D=major problems, F=dangerous gaps
+- Worst problems first in findings
+- If you cannot read a screenshot, add a warning finding`;
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514", max_tokens: 4000, system: sys,
+          messages: [{ role: "user", content: [...imageContents, ...dealContents, { type: "text", text: `Audit these schedules for week of ${weekOf}. Return ONLY the JSON.` }] }],
+        }),
+      });
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(`API ${res.status}: ${errBody.slice(0,200)}`);
+      }
+      const rd = await res.json();
+      const txt = rd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("") || "";
+      const clean = txt.replace(/```json|```/g, "").trim();
+      try { setResult({ data: JSON.parse(clean) }); }
+      catch { setResult({ raw: txt }); }
+    } catch (err) {
+      if (!result?.error) setResult({ error: err.message });
+    }
+    setLoading(false); setStep("");
+  };
+
+  // ============ SETTINGS MODAL ============
+  const SettingsModal = () => (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={() => setShowSettings(false)}>
+      <div className="fade-in" onClick={e => e.stopPropagation()} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, width: "100%", maxWidth: 420 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 800, color: "#fff", margin: 0 }}>⚙️ Settings</h2>
+          <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", color: C.dim, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+
+        <label style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6, fontWeight: 700 }}>Anthropic API Key</label>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+          <input
+            type={apiKeyVisible ? "text" : "password"}
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            placeholder="sk-ant-api03-..."
+            style={{ flex: 1, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px 12px", fontSize: 12, fontFamily: "inherit" }}
+          />
+          <button onClick={() => setApiKeyVisible(!apiKeyVisible)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.dim, padding: "8px 10px", fontSize: 14, cursor: "pointer" }}>
+            {apiKeyVisible ? "🙈" : "👁️"}
+          </button>
+        </div>
+        <p style={{ fontSize: 10, color: C.dim, lineHeight: 1.5, marginBottom: 16 }}>
+          Your key is stored locally in this browser only. Never shared. Get one at{" "}
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: C.accent }}>console.anthropic.com</a>
+        </p>
+
+        <label style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6, fontWeight: 700 }}>Data</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { if (confirm("Reset all rules to defaults?")) { setRules(DEFAULT_RULES.map(r => ({ ...r, on: true }))); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${C.yellowBdr}`, background: C.yellowBg, color: C.yellow, fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+            Reset Rules
+          </button>
+          <button onClick={() => { if (confirm("Clear ALL saved data?")) { localStorage.clear(); location.reload(); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${C.redBdr}`, background: C.redBg, color: C.red, fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+            Clear All Data
+          </button>
+        </div>
+
+        <div style={{ marginTop: 16, padding: "10px 12px", background: C.card2, borderRadius: 8, fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>How it works:</strong> This tool sends your schedule screenshots to Claude AI via the Anthropic API. It also searches the web for Calgary weather, holidays, sports events, and government payment dates to factor into the audit. All processing happens between your browser and the API directly.
+        </div>
+
+        <button onClick={() => setShowSettings(false)} style={{ width: "100%", marginTop: 16, padding: "10px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+
+  // ============ RESULTS VIEW ============
+  if (view === "results") {
+    const d = result?.data;
+    const totalCrit = d?.stores?.reduce((s, st) => s + (st.criticals || 0), 0) || 0;
+    const totalWarn = d?.stores?.reduce((s, st) => s + (st.warnings || 0), 0) || 0;
+    const totalPass = d?.stores?.reduce((s, st) => s + (st.passes || 0), 0) || 0;
+
+    return (
+      <div style={{ background: C.bg, minHeight: "100vh", minHeight: "100dvh", color: C.text }}>
+        {showSettings && <SettingsModal />}
+        {/* Top bar */}
+        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 50 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={() => { setView("setup"); setResult(null); }} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.accent, padding: "5px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>← Edit</button>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>Week of {weekOf}</span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setShowSettings(true)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.dim, padding: "5px 8px", fontSize: 12, cursor: "pointer" }}>⚙️</button>
+            <button onClick={() => { setView("setup"); setTimeout(runAudit, 200); }} disabled={loading} style={{ background: C.accent + "18", border: `1px solid ${C.accent}30`, borderRadius: 8, color: C.accent, padding: "5px 12px", fontSize: 10, cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600 }}>↻ Re-run</button>
+          </div>
+        </div>
+
+        {/* Loading state */}
+        {loading && (
+          <div className="fade-in" style={{ padding: "60px 20px", textAlign: "center" }}>
+            <div style={{ width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin .8s linear infinite", margin: "0 auto 16px" }} />
+            <div style={{ fontSize: 13, color: C.text, fontWeight: 600, marginBottom: 6 }}>{step || "Analyzing..."}</div>
+            <div style={{ width: "60%", height: 3, background: C.card, borderRadius: 2, overflow: "hidden", margin: "12px auto" }}>
+              <div style={{ height: "100%", background: `linear-gradient(90deg, ${C.accent}, ${C.green})`, borderRadius: 2, animation: "pulse 1.5s ease-in-out infinite" }} />
+            </div>
+            <div style={{ fontSize: 10, color: C.dim, marginTop: 8 }}>This usually takes 15–30 seconds</div>
+          </div>
+        )}
+
+        {/* Error */}
+        {result?.error && (
+          <div className="fade-in" style={{ margin: 14, padding: 16, background: C.redBg, border: `2px solid ${C.redBdr}`, borderRadius: 12, color: C.red, fontSize: 13, lineHeight: 1.5 }}>
+            <strong>Error:</strong> {result.error}
+          </div>
+        )}
+        {result?.raw && (
+          <div className="fade-in" style={{ margin: 14, padding: 14, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, fontSize: 11, whiteSpace: "pre-wrap", maxHeight: 500, overflow: "auto", color: C.text }}>{result.raw}</div>
+        )}
+
+        {/* Dashboard */}
+        {d && (
+          <div className="fade-in" style={{ padding: "12px 14px", maxWidth: 860, margin: "0 auto" }}>
+            {/* Scoreboard */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {[
+                { n: totalCrit, label: "Critical", color: C.red, bg: C.redBg, active: totalCrit > 0 },
+                { n: totalWarn, label: "Warnings", color: C.yellow, bg: C.yellowBg, active: totalWarn > 0 },
+                { n: totalPass, label: "Passed", color: C.green, bg: C.card, active: false },
+              ].map((b, i) => (
+                <div key={i} style={{ flex: 1, background: b.active ? b.bg : C.card, border: `1px solid ${b.active ? b.color + "50" : C.border}`, borderRadius: 12, padding: "12px 14px", textAlign: "center" }}>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: b.active ? b.color : (b.n > 0 ? b.color : C.green), textShadow: b.active ? `0 0 20px ${b.color}60` : "none" }}>{b.n}</div>
+                  <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 2 }}>{b.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Red Flags */}
+            {d.alerts?.filter(a => a.level === "critical").length > 0 && (
+              <div style={{ background: `linear-gradient(135deg, ${C.redBg}, #120505)`, border: `2px solid ${C.red}50`, borderRadius: 14, padding: "14px 16px", marginBottom: 12, boxShadow: `0 0 30px ${C.red}15, inset 0 0 30px ${C.red}08` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: C.red, boxShadow: `0 0 12px ${C.red}`, animation: "blink 1.2s infinite" }} />
+                  <span style={{ fontSize: 14, fontWeight: 900, color: C.red, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Red Flags ({d.alerts.filter(a => a.level === "critical").length})
+                  </span>
+                </div>
+                {d.alerts.filter(a => a.level === "critical").map((a, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", background: "#200a0a", borderRadius: 10, marginBottom: i < d.alerts.filter(x => x.level === "critical").length - 1 ? 6 : 0, border: `1px solid ${C.redBdr}` }}>
+                    <span style={{ fontSize: 24, flexShrink: 0 }}>{a.icon || "🚨"}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "#fca5a5", lineHeight: 1.2 }}>{a.title}</div>
+                      <div style={{ fontSize: 11, color: "#d48787", marginTop: 2 }}>{a.detail}</div>
+                    </div>
+                    {a.store !== "ALL" && <span style={{ fontSize: 9, background: C.redBdr, color: "#fca5a5", padding: "3px 8px", borderRadius: 6, fontWeight: 700, flexShrink: 0 }}>{a.store}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Warnings */}
+            {d.alerts?.filter(a => a.level === "warning").length > 0 && (
+              <div style={{ background: C.yellowBg, border: `1px solid ${C.yellowBdr}`, borderRadius: 14, padding: "12px 16px", marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: C.yellow, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  ⚠️ Warnings ({d.alerts.filter(a => a.level === "warning").length})
+                </div>
+                {d.alerts.filter(a => a.level === "warning").map((a, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: i > 0 ? `1px solid ${C.yellowBdr}` : "none" }}>
+                    <span style={{ fontSize: 18 }}>{a.icon || "⚠️"}</span>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fde68a" }}>{a.title} </span>
+                      <span style={{ fontSize: 11, color: "#c9a210" }}>{a.detail}</span>
+                    </div>
+                    {a.store !== "ALL" && <span style={{ fontSize: 9, background: C.yellowBdr, color: "#fde68a", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>{a.store}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* External Factors */}
+            {d.external?.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6, marginBottom: 12 }}>
+                {d.external.map((e, i) => (
+                  <div key={i} style={{ background: C.card, border: `1px solid ${statusC[e.status]}25`, borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8, borderLeft: `3px solid ${statusC[e.status]}` }}>
+                    <span style={{ fontSize: 20 }}>{e.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: statusC[e.status] }}>{e.label}</div>
+                      <div style={{ fontSize: 9, color: C.dim, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.note}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Store Cards */}
+            {d.stores?.map((st, si) => {
+              const open = expandedStore === si;
+              const crits = st.findings?.filter(f => f.sev === "critical") || [];
+              const warns = st.findings?.filter(f => f.sev === "warning") || [];
+              const pass = st.findings?.filter(f => f.sev === "pass") || [];
+              return (
+                <div key={si} style={{ background: C.card, borderRadius: 14, marginBottom: 10, overflow: "hidden", border: `1px solid ${st.criticals > 0 ? C.red + "35" : C.border}`, boxShadow: st.criticals > 0 ? `0 0 24px ${C.red}08` : "none" }}>
+                  <div onClick={() => setExpandedStore(open ? null : si)} style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 50, height: 50, borderRadius: 12, background: `${gradeC[st.grade] || C.dim}12`, border: `2px solid ${gradeC[st.grade] || C.dim}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 900, color: gradeC[st.grade] || C.dim, flexShrink: 0 }}>{st.grade}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6, color: "#fff" }}>{st.name}</div>
+                      <div style={{ display: "flex", gap: 3 }}>
+                        {DAYS.map(day => {
+                          const color = st.dayGrid?.[day] || "green";
+                          return (
+                            <div key={day} style={{ flex: 1, textAlign: "center" }}>
+                              <div style={{ fontSize: 7, color: C.dim, marginBottom: 2, fontWeight: 600 }}>{day}</div>
+                              <div style={{ height: 10, borderRadius: 3, background: dayC[color], boxShadow: color === "red" ? `0 0 8px ${C.red}50` : "none" }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                      {st.criticals > 0 && <div style={{ background: C.redBg, border: `1px solid ${C.redBdr}`, borderRadius: 8, padding: "4px 8px", display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: C.red, boxShadow: `0 0 6px ${C.red}` }} /><span style={{ fontSize: 13, fontWeight: 900, color: C.red }}>{st.criticals}</span></div>}
+                      {st.warnings > 0 && <div style={{ background: C.yellowBg, border: `1px solid ${C.yellowBdr}`, borderRadius: 8, padding: "4px 8px", display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: C.yellow }} /><span style={{ fontSize: 13, fontWeight: 800, color: C.yellow }}>{st.warnings}</span></div>}
+                      <span style={{ fontSize: 14, color: C.dim }}>{open ? "▲" : "▼"}</span>
+                    </div>
+                  </div>
+                  {open && (
+                    <div className="fade-in" style={{ borderTop: `1px solid ${C.border}`, padding: "10px 16px 14px" }}>
+                      {crits.map((f, fi) => (
+                        <div key={"c" + fi} style={{ display: "flex", gap: 10, padding: "8px 10px", marginBottom: 4, background: C.redBg, borderRadius: 8, border: `1px solid ${C.redBdr}`, alignItems: "flex-start" }}>
+                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: C.red, marginTop: 3, flexShrink: 0, boxShadow: `0 0 8px ${C.red}` }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 2 }}>
+                              <span style={{ fontSize: 8, background: C.redBdr, color: "#fca5a5", padding: "1px 5px", borderRadius: 3, fontWeight: 800, textTransform: "uppercase" }}>Critical</span>
+                              <span style={{ fontSize: 8, background: C.card2, color: C.dim, padding: "1px 5px", borderRadius: 3 }}>{f.day}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: "#fca5a5", fontWeight: 700 }}>{f.msg}</div>
+                            {f.fix && <div style={{ fontSize: 11, color: C.yellow, marginTop: 2 }}>→ {f.fix}</div>}
+                          </div>
+                        </div>
+                      ))}
+                      {warns.map((f, fi) => (
+                        <div key={"w" + fi} style={{ display: "flex", gap: 10, padding: "8px 10px", marginBottom: 4, background: C.yellowBg + "80", borderRadius: 8, border: `1px solid ${C.yellowBdr}60`, alignItems: "flex-start" }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.yellow, marginTop: 4, flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 2 }}>
+                              <span style={{ fontSize: 8, background: C.yellowBdr, color: "#fde68a", padding: "1px 5px", borderRadius: 3, fontWeight: 700 }}>Warning</span>
+                              <span style={{ fontSize: 8, background: C.card2, color: C.dim, padding: "1px 5px", borderRadius: 3 }}>{f.day}</span>
+                            </div>
+                            <div style={{ fontSize: 12, color: "#fde68a" }}>{f.msg}</div>
+                            {f.fix && <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>→ {f.fix}</div>}
+                          </div>
+                        </div>
+                      ))}
+                      {pass.length > 0 && (
+                        <div style={{ marginTop: 4, padding: "8px 10px", background: C.greenBg, borderRadius: 8, border: `1px solid ${C.greenBdr}` }}>
+                          <span style={{ fontSize: 10, color: C.green, fontWeight: 700 }}>✅ {pass.length} passed</span>
+                          <span style={{ fontSize: 10, color: "#6ee7b7", marginLeft: 8 }}>{pass.map(f => f.msg).join(" · ")}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {d.summary && (
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 16px", fontSize: 12, color: C.dim, marginTop: 4 }}>
+                <span style={{ color: C.accent, fontWeight: 700 }}>Summary: </span>{d.summary}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ============ SETUP VIEW ============
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh", minHeight: "100dvh", color: C.text }}>
+      {showSettings && <SettingsModal />}
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg, #0a0e16, #141c2a)", borderBottom: `1px solid ${C.border}`, padding: "16px 18px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #dc2626, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🍕</div>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fff" }}>Schedule Audit</h1>
+              <p style={{ margin: 0, fontSize: 9, color: C.dim, letterSpacing: "0.1em", textTransform: "uppercase" }}>AC Region · Calgary</p>
+            </div>
+          </div>
+          <button onClick={() => setShowSettings(true)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.dim, padding: "6px 10px", fontSize: 13, cursor: "pointer" }}>⚙️</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Week of</span>
+          <input type="date" value={weekOf} onChange={e => setWeekOf(e.target.value)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "5px 8px", fontSize: 12, fontFamily: "inherit" }} />
+          {!apiKey && (
+            <span onClick={() => setShowSettings(true)} style={{ fontSize: 9, background: C.redBg, border: `1px solid ${C.redBdr}`, color: C.red, padding: "3px 8px", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>
+              ⚠️ Set API Key
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, background: C.card, position: "sticky", top: 0, zIndex: 50 }}>
+        {["schedules", "deals", "rules"].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            flex: 1, padding: "10px 4px", border: "none", cursor: "pointer",
+            background: tab === t ? C.card2 : "transparent",
+            borderBottom: tab === t ? `2px solid ${C.accent}` : "2px solid transparent",
+            color: tab === t ? C.accent : C.dim, fontSize: 10, fontWeight: 700,
+            fontFamily: "inherit", textTransform: "uppercase", letterSpacing: "0.04em",
+          }}>
+            {t === "schedules" ? `📋 Schedules (${imgCount})` : t === "deals" ? `🏷️ Deals (${dealImgs.length})` : `⚙️ Rules (${rules.filter(r => r.on).length})`}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: "12px 16px", maxWidth: 800, margin: "0 auto", paddingBottom: 80 }}>
+        {tab === "schedules" && STORES.map((store, si) => (
+          <div key={store} style={{ background: C.card, border: `1px solid ${sel[si] ? C.border : C.card}`, borderRadius: 10, marginBottom: 6, opacity: sel[si] ? 1 : 0.35, overflow: "hidden", transition: "opacity .2s" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div onClick={() => setSel(p => p.map((v, i) => i === si ? !v : v))} style={{ width: 18, height: 18, borderRadius: 4, cursor: "pointer", border: `2px solid ${sel[si] ? C.accent : C.dim}`, background: sel[si] ? C.accent + "20" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: C.accent, fontSize: 11 }}>{sel[si] && "✓"}</div>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>{store}</span>
+                {(imgs[store]?.length || 0) > 0 && <span style={{ fontSize: 9, background: C.greenBg, color: C.green, padding: "1px 6px", borderRadius: 6 }}>{imgs[store].length}</span>}
+              </div>
+              <button onClick={() => pickFile(store)} disabled={!sel[si]} style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: C.card2, color: C.accent, fontSize: 10, fontFamily: "inherit", cursor: sel[si] ? "pointer" : "default", fontWeight: 600 }}>+ Upload</button>
+            </div>
+            {imgs[store]?.length > 0 && (
+              <div style={{ padding: "4px 12px 8px", display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {imgs[store].map((img, idx) => (
+                  <div key={idx} style={{ position: "relative" }}>
+                    <img src={img.b64} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, border: `1px solid ${C.border}` }} />
+                    <div onClick={() => setImgs(p => ({ ...p, [store]: p[store].filter((_, i) => i !== idx) }))} style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: 7, background: C.red, color: "#fff", fontSize: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {tab === "deals" && (
+          <div>
+            <div onClick={pickDeal} style={{ width: "100%", padding: 12, borderRadius: 10, border: `2px dashed ${C.border}`, background: C.card, color: C.accent, fontSize: 12, cursor: "pointer", fontWeight: 600, textAlign: "center", marginBottom: 8, boxSizing: "border-box", fontFamily: "inherit" }}>📸 Upload Deal Screenshots</div>
+            {dealImgs.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, padding: 8, background: C.card, borderRadius: 10, border: `1px solid ${C.border}` }}>
+                {dealImgs.map((img, idx) => (
+                  <div key={idx} style={{ position: "relative" }}>
+                    <img src={img.b64} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6 }} />
+                    <div onClick={() => setDealImgs(p => p.filter((_, i) => i !== idx))} style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: 7, background: C.red, color: "#fff", fontSize: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="e.g. BOGO Mar 25 – Apr 7, 5.5.5 weekends only..." rows={3} style={{ width: "100%", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: 10, fontSize: 11, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+          </div>
+        )}
+
+        {tab === "rules" && (
+          <div>
+            <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>+ Add Rule</div>
+              <select value={newCat} onChange={e => setNewCat(e.target.value)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "4px 6px", fontSize: 10, fontFamily: "inherit", marginBottom: 4, display: "block" }}>
+                {["Staffing", "Overlap", "Coverage", "Holiday", "Weather", "Events", "Deals", "Custom"].map(c => <option key={c}>{c}</option>)}
+              </select>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={newRule} onChange={e => setNewRule(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newRule.trim()) { setRules(p => [...p, { id: gid(), cat: newCat, rule: newRule.trim(), on: true }]); setNewRule(""); } }} placeholder="Rule description..." style={{ flex: 1, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "6px 8px", fontSize: 11, fontFamily: "inherit" }} />
+                <button onClick={() => { if (newRule.trim()) { setRules(p => [...p, { id: gid(), cat: newCat, rule: newRule.trim(), on: true }]); setNewRule(""); } }} style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: C.greenBg, color: C.green, fontSize: 10, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>Add</button>
+              </div>
+            </div>
+            {rules.map(r => (
+              <div key={r.id} style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 10px", background: C.card, border: `1px solid ${r.on ? C.border : C.card}`, borderRadius: 8, marginBottom: 3, opacity: r.on ? 1 : 0.3, transition: "opacity .2s" }}>
+                <div onClick={() => setRules(p => p.map(x => x.id === r.id ? { ...x, on: !x.on } : x))} style={{ width: 16, height: 16, borderRadius: 4, cursor: "pointer", flexShrink: 0, border: `2px solid ${r.on ? C.green : C.dim}`, background: r.on ? C.greenBg : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: C.green, fontSize: 9 }}>{r.on && "✓"}</div>
+                <span style={{ fontSize: 8, color: C.dim, background: C.card2, padding: "1px 4px", borderRadius: 3, flexShrink: 0 }}>{r.cat}</span>
+                <span style={{ flex: 1, fontSize: 10, lineHeight: 1.3 }}>{r.rule}</span>
+                {!DEFAULT_RULES.find(d => d.id === r.id) && <div onClick={() => setRules(p => p.filter(x => x.id !== r.id))} style={{ color: C.red, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>×</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Floating audit button */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "10px 16px 14px", background: `linear-gradient(transparent, ${C.bg} 30%)`, zIndex: 40 }}>
+        <button onClick={runAudit} disabled={loading || imgCount === 0} style={{
+          width: "100%", maxWidth: 800, margin: "0 auto", display: "block",
+          padding: 14, borderRadius: 12, border: "none",
+          cursor: loading || imgCount === 0 ? "default" : "pointer",
+          background: loading ? C.card : imgCount === 0 ? C.card : "linear-gradient(135deg, #dc2626, #ea580c)",
+          color: loading || imgCount === 0 ? C.dim : "#fff",
+          fontSize: 14, fontWeight: 900, fontFamily: "inherit",
+          boxShadow: imgCount > 0 && !loading ? "0 4px 24px #dc262640" : "none",
+          letterSpacing: "0.02em",
+        }}>
+          {loading ? `⏳ ${step}` : imgCount === 0 ? "Upload schedules to start" : `🔍 Run Audit — ${STORES.filter((_, i) => sel[i]).length} Stores`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

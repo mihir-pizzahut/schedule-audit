@@ -180,113 +180,144 @@ function App() {
 
     try {
       const activeRules = rules.filter(r => r.on).map(r => `[${r.cat}] ${r.rule}`).join("\n");
-      const imageContents = [];
-      const storeNames = [];
 
-      // Compress all images first to reduce token usage
-      setStep("Compressing images...");
+      // Collect selected stores with images
+      const storesToAudit = [];
       for (const [si, st] of STORES.entries()) {
-        if (!sel[si]) continue;
-        const stImgs = imgs[st] || [];
-        if (stImgs.length === 0) continue;
-        storeNames.push(st);
-        for (let idx = 0; idx < stImgs.length; idx++) {
-          const compressed = await compressImage(stImgs[idx].b64, 1200, 0.55);
-          const d = compressed.split(",")[1];
-          imageContents.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
-          imageContents.push({ type: "text", text: `[${st} schedule - image ${idx + 1}]` });
-        }
+        if (!sel[si] || !(imgs[st]?.length)) continue;
+        storesToAudit.push(st);
       }
-      const dealContents = [];
-      for (let idx = 0; idx < dealImgs.length; idx++) {
-        const compressed = await compressImage(dealImgs[idx].b64, 1000, 0.5);
-        const d = compressed.split(",")[1];
-        dealContents.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
-        dealContents.push({ type: "text", text: `[Deal screenshot ${idx + 1}: ${dealImgs[idx].name}]` });
-      }
+      if (storesToAudit.length === 0) { setResult({ error: "Upload at least one schedule screenshot first." }); setLoading(false); return; }
 
-      if (storeNames.length === 0) { setResult({ error: "Upload at least one schedule screenshot first." }); setLoading(false); return; }
-
-      // Step 1: External context
+      // Step 1: External context (text only — tiny token count)
       setStep("Checking Calgary weather, holidays, sports & payments...");
       let ext = "";
       try {
         const cd = await apiFetch({
           model: "claude-sonnet-4-20250514", max_tokens: 1000,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: `Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather forecast - any snow/extreme cold below -15C?\n2) Alberta stat holidays that week or adjacent creating long weekend?\n3) Major Calgary/Alberta sports events (Flames, Stampeders, national)?\n4) Government benefit payment dates (GST credit, CCB, Alberta)?\n5) Any notable Calgary events?\nJust facts and dates, be concise.` }],
+          messages: [{ role: "user", content: `Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather - any snow/extreme cold?\n2) Alberta stat holidays that week?\n3) Calgary sports events?\n4) Government payment dates?\n5) Notable events?\nBe very concise, max 3 lines each.` }],
         }, apiKey, setStep);
         ext = cd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n") || "";
       } catch (err) {
         if (err.message.includes("Invalid API key")) { setResult({ error: err.message }); setLoading(false); return; }
-        ext = "External context unavailable: " + err.message;
+        ext = "External context unavailable.";
       }
 
-      // Step 2: Schedule analysis
-      setStep("AI reading your schedules...");
-      const sys = `You are a Pizza Hut scheduling audit AI for Calgary, Alberta. Analyze schedule screenshots and return a VISUAL AUDIT DASHBOARD as JSON.
+      // Compress deal images once
+      const dealContentParts = [];
+      for (let idx = 0; idx < dealImgs.length; idx++) {
+        const compressed = await compressImage(dealImgs[idx].b64, 600, 0.3);
+        const d = compressed.split(",")[1];
+        dealContentParts.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
+        dealContentParts.push({ type: "text", text: `[Deal: ${dealImgs[idx].name}]` });
+      }
+
+      // Step 2: Audit each store ONE AT A TIME with pauses
+      const allStoreResults = [];
+      const allAlerts = [];
+      const externalFactors = [];
+
+      const singleStoreSys = (storeName, isFirst) => `You are a Pizza Hut scheduling audit AI for Calgary, Alberta. Analyze the schedule screenshot(s) for ${storeName} and return JSON.
 
 RULES:
 ${activeRules}
 
-EXTERNAL CONTEXT (week of ${weekOf}):
-${ext}
+${isFirst ? `EXTERNAL CONTEXT (week of ${weekOf}):\n${ext}` : ""}
+${isFirst && dealNotes ? `DEAL NOTES: ${dealNotes}` : ""}
 
-${dealNotes ? `DEAL NOTES: ${dealNotes}` : ""}
+KEY CONTEXT: Salaried employees cover SM requirement. Doughmaster is NOT a separate role — need min 2 people in morning for dough.
 
-STORES: ${storeNames.join(", ")}
-
-KEY CONTEXT: Salaried employees (salary staff) cover the Shift Manager requirement. If a salaried employee is scheduled on a shift, do NOT flag that shift as missing a Shift Manager — it is covered. Doughmaster is NOT a separate job title — dough is made by production staff, shift managers, or salaried employees. The rule is simply that at least 2 people must be scheduled in the morning shift so dough can be made.
-
-RESPOND ONLY WITH THIS EXACT JSON (no markdown, no backticks, no extra text):
+RESPOND ONLY WITH THIS JSON (no markdown, no backticks):
 {
-  "alerts": [
-    { "level": "critical|warning", "icon": "emoji", "title": "Short bold title max 8 words", "detail": "1 line max 12 words", "store": "StoreName or ALL" }
-  ],
-  "external": [
-    { "type": "weather|holiday|sports|payments|deals", "icon": "emoji", "label": "2-3 word label", "status": "ok|watch|alert", "note": "8 words max" }
-  ],
-  "stores": [
-    {
-      "name": "StoreName",
-      "grade": "A|B|C|D|F",
-      "criticals": 0,
-      "warnings": 0,
-      "passes": 0,
-      "dayGrid": {
-        "Mon": "green|yellow|red",
-        "Tue": "green|yellow|red",
-        "Wed": "green|yellow|red",
-        "Thu": "green|yellow|red",
-        "Fri": "green|yellow|red",
-        "Sat": "green|yellow|red",
-        "Sun": "green|yellow|red"
-      },
-      "findings": [
-        { "sev": "critical|warning|pass", "day": "Mon|Tue|Wed|Thu|Fri|Sat|Sun|General", "msg": "Max 12 words", "fix": "Max 10 words or empty string" }
-      ]
-    }
-  ],
-  "summary": "1 sentence max 20 words"
+  ${isFirst ? `"alerts": [ { "level": "critical|warning", "icon": "emoji", "title": "max 8 words", "detail": "max 12 words", "store": "${storeName} or ALL" } ],` : ""}
+  ${isFirst ? `"external": [ { "type": "weather|holiday|sports|payments|deals", "icon": "emoji", "label": "2-3 words", "status": "ok|watch|alert", "note": "max 8 words" } ],` : ""}
+  "store": {
+    "name": "${storeName}",
+    "grade": "A|B|C|D|F",
+    "criticals": 0, "warnings": 0, "passes": 0,
+    "dayGrid": { "Mon":"green|yellow|red","Tue":"green|yellow|red","Wed":"green|yellow|red","Thu":"green|yellow|red","Fri":"green|yellow|red","Sat":"green|yellow|red","Sun":"green|yellow|red" },
+    "findings": [ { "sev": "critical|warning|pass", "day": "Mon-Sun|General", "msg": "max 12 words", "fix": "max 10 words or empty" } ]
+  }
 }
+Keep text SHORT. Red=critical, yellow=warning, green=good. Worst problems first.`;
 
-CRITICAL INSTRUCTIONS:
-- "alerts" = ONLY critical and warning items globally across all stores. Sorted critical first. RED FLAGS first.
-- Keep ALL text extremely short. Visual dashboard, not a report.
-- dayGrid: red=critical issue, yellow=minor issue, green=good
-- Grade: A=perfect, B=minor, C=needs fixes, D=major problems, F=dangerous gaps
-- Worst problems first in findings
-- If you cannot read a screenshot, add a warning finding`;
+      for (let si = 0; si < storesToAudit.length; si++) {
+        const st = storesToAudit[si];
+        const isFirst = si === 0;
 
-      setStep("AI reading your schedules...");
-      const rd = await apiFetch({
-        model: "claude-sonnet-4-20250514", max_tokens: 4000, system: sys,
-        messages: [{ role: "user", content: [...imageContents, ...dealContents, { type: "text", text: `Audit these schedules for week of ${weekOf}. Return ONLY the JSON.` }] }],
-      }, apiKey, setStep);
-      const txt = rd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("") || "";
-      const clean = txt.replace(/```json|```/g, "").trim();
-      try { setResult({ data: JSON.parse(clean) }); }
-      catch { setResult({ raw: txt }); }
+        // Wait between stores to avoid rate limit
+        if (si > 0) {
+          const waitSec = 65;
+          for (let w = waitSec; w > 0; w--) {
+            setStep(`Rate limit cooldown: ${w}s... then auditing ${st} (${si + 1}/${storesToAudit.length})`);
+            await delay(1000);
+          }
+        }
+
+        // Compress this store's images aggressively
+        setStep(`Compressing ${st} images (${si + 1}/${storesToAudit.length})...`);
+        const storeImgParts = [];
+        for (let idx = 0; idx < imgs[st].length; idx++) {
+          const compressed = await compressImage(imgs[st][idx].b64, 800, 0.35);
+          const d = compressed.split(",")[1];
+          storeImgParts.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
+          storeImgParts.push({ type: "text", text: `[${st} schedule image ${idx + 1}]` });
+        }
+
+        setStep(`AI auditing ${st} (${si + 1}/${storesToAudit.length})...`);
+        try {
+          const userContent = [
+            ...storeImgParts,
+            ...(isFirst ? dealContentParts : []),
+            { type: "text", text: `Audit ${st} schedule for week of ${weekOf}. Return ONLY the JSON.` }
+          ];
+
+          const rd = await apiFetch({
+            model: "claude-sonnet-4-20250514", max_tokens: 2000,
+            system: singleStoreSys(st, isFirst),
+            messages: [{ role: "user", content: userContent }],
+          }, apiKey, setStep);
+
+          const txt = rd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("") || "";
+          const clean = txt.replace(/```json|```/g, "").trim();
+          try {
+            const parsed = JSON.parse(clean);
+            if (parsed.store) allStoreResults.push(parsed.store);
+            if (parsed.alerts) allAlerts.push(...parsed.alerts);
+            if (parsed.external) externalFactors.push(...parsed.external);
+          } catch {
+            allStoreResults.push({
+              name: st, grade: "?", criticals: 0, warnings: 1, passes: 0,
+              dayGrid: { Mon:"yellow",Tue:"yellow",Wed:"yellow",Thu:"yellow",Fri:"yellow",Sat:"yellow",Sun:"yellow" },
+              findings: [{ sev: "warning", day: "General", msg: "Could not parse AI response for this store", fix: "Re-run audit" }]
+            });
+          }
+        } catch (err) {
+          allStoreResults.push({
+            name: st, grade: "?", criticals: 0, warnings: 1, passes: 0,
+            dayGrid: { Mon:"yellow",Tue:"yellow",Wed:"yellow",Thu:"yellow",Fri:"yellow",Sat:"yellow",Sun:"yellow" },
+            findings: [{ sev: "warning", day: "General", msg: `API error: ${err.message.slice(0,50)}`, fix: "Re-run audit" }]
+          });
+        }
+      }
+
+      // Merge into final dashboard
+      const totalC = allStoreResults.reduce((s, st) => s + (st.criticals || 0), 0);
+      const totalW = allStoreResults.reduce((s, st) => s + (st.warnings || 0), 0);
+      // Add store-specific alerts from later stores
+      for (let si = 1; si < allStoreResults.length; si++) {
+        const st = allStoreResults[si];
+        if (st.criticals > 0) allAlerts.push({ level: "critical", icon: "🚨", title: `${st.name} has ${st.criticals} critical issues`, detail: "Expand store card for details", store: st.name });
+      }
+
+      setResult({ data: {
+        alerts: allAlerts.sort((a, b) => a.level === "critical" ? -1 : 1),
+        external: externalFactors,
+        stores: allStoreResults,
+        summary: `Audited ${storesToAudit.length} stores: ${totalC} critical issues, ${totalW} warnings found.`
+      }});
+
     } catch (err) {
       if (!result?.error) setResult({ error: err.message });
     }

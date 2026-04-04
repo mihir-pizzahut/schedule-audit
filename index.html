@@ -6,486 +6,400 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#06080c">
-<meta name="description" content="Pizza Hut Schedule Audit Tool — AC Region Calgary">
 <title>Schedule Audit · AC Region</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍕</text></svg>">
-<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiU2NoZWR1bGUgQXVkaXQiLCJzaG9ydF9uYW1lIjoiQXVkaXQiLCJzdGFydF91cmwiOiIuIiwiZGlzcGxheSI6InN0YW5kYWxvbmUiLCJiYWNrZ3JvdW5kX2NvbG9yIjoiIzA2MDgwYyIsInRoZW1lX2NvbG9yIjoiIzA2MDgwYyJ9">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { background: #06080c; font-family: 'SF Mono','Fira Code','Cascadia Code','JetBrains Mono',monospace; overflow-x: hidden; }
-  #root { min-height: 100vh; min-height: 100dvh; }
-  input, select, textarea, button { font-family: inherit; }
-  ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-track { background: #0e1219; }
-  ::-webkit-scrollbar-thumb { background: #1c2536; border-radius: 4px; }
-  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
-  @keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-  .fade-in { animation: slideUp 0.3s ease-out; }
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#06080c;font-family:'SF Mono','Fira Code','Cascadia Code','JetBrains Mono',monospace;overflow-x:hidden}
+#root{min-height:100vh;min-height:100dvh}
+input,select,textarea,button{font-family:inherit}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0e1219}::-webkit-scrollbar-thumb{background:#1c2536;border-radius:4px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:slideUp .3s ease-out}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useRef, useEffect, useCallback } = React;
+const{useState,useRef,useEffect}=React;
 
-const STORES = ["McKnight", "Hanson Ranch", "Montgomery", "Sarcee", "Crowfoot"];
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const DEFAULT_RULES = [
-  { id: "r1", cat: "Staffing", rule: "Weekdays: 1 Shift Manager OR Salaried Employee in AM, 1 in PM. If salaried employee is scheduled, no separate SM needed" },
-  { id: "r2", cat: "Staffing", rule: "Weekdays: Minimum 1 Cook scheduled in PM shift" },
-  { id: "r3", cat: "Staffing", rule: "Weekends (Fri/Sat/Sun): Multiple staff per shift expected" },
-  { id: "r4", cat: "Staffing", rule: "Minimum 2 people in morning shift (dough is made by production, SM, or salaried — not a separate role)" },
-  { id: "r5", cat: "Overlap", rule: "Max 30 min overlap between Shift Managers/Salaried employees — flag if more" },
-  { id: "r6", cat: "Coverage", rule: "Majority of scheduled hours must fall within store open hours" },
-  { id: "r7", cat: "Coverage", rule: "Peak hours 4 PM–8 PM must have highest staffing density" },
-  { id: "r8", cat: "Holiday", rule: "Stat holiday weekends: Thu before & Mon after are BUSY, Fri/Sat/Sun are SLOW" },
-  { id: "r9", cat: "Weather", rule: "Snow or extreme cold in Calgary = BUSY, need extra staff" },
-  { id: "r10", cat: "Events", rule: "Calgary/Alberta sports events or special days = need extra staff" },
-  { id: "r11", cat: "Events", rule: "Government benefit payment days (Alberta) = BUSY" },
-  { id: "r12", cat: "Deals", rule: "Active deals (BOGO, 5.5.5, etc.) = BUSY, need more staff" },
+const STORES=["McKnight","Hanson Ranch","Montgomery","Sarcee","Crowfoot"];
+const DAYS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const DEFAULT_RULES=[
+  {id:"r1",cat:"Staffing",rule:"Weekdays: 1 Shift Manager OR Salaried Employee in AM, 1 in PM. If salaried employee is scheduled, no separate SM needed"},
+  {id:"r2",cat:"Staffing",rule:"Weekdays: Minimum 1 Cook scheduled in PM shift"},
+  {id:"r3",cat:"Staffing",rule:"Weekends (Fri/Sat/Sun): Multiple staff per shift expected"},
+  {id:"r4",cat:"Staffing",rule:"Minimum 2 people in morning shift (dough made by production, SM, or salaried — not separate role)"},
+  {id:"r5",cat:"Overlap",rule:"Max 30 min overlap between Shift Managers/Salaried — flag if more"},
+  {id:"r6",cat:"Coverage",rule:"Majority of hours must fall within store open hours"},
+  {id:"r7",cat:"Coverage",rule:"Peak hours 4 PM–8 PM must have highest staffing density"},
+  {id:"r8",cat:"Holiday",rule:"Stat holiday weekends: Thu before & Mon after are BUSY, Fri/Sat/Sun are SLOW"},
+  {id:"r9",cat:"Weather",rule:"Snow or extreme cold in Calgary = BUSY, need extra staff"},
+  {id:"r10",cat:"Events",rule:"Calgary/Alberta sports events or special days = need extra staff"},
+  {id:"r11",cat:"Events",rule:"Government benefit payment days (Alberta) = BUSY"},
+  {id:"r12",cat:"Deals",rule:"Active deals (BOGO, 5.5.5, etc.) = BUSY, need more staff"},
 ];
 
-const LS = {
-  get: (k, d) => { try { const v = localStorage.getItem("sa_" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
-  set: (k, v) => { try { localStorage.setItem("sa_" + k, JSON.stringify(v)); } catch {} },
+const LS={
+  get:(k,d)=>{try{const v=localStorage.getItem("sa_"+k);return v?JSON.parse(v):d}catch{return d}},
+  set:(k,v)=>{try{localStorage.setItem("sa_"+k,JSON.stringify(v))}catch{}},
 };
+const gid=()=>"r"+Date.now()+Math.random().toString(36).slice(2,5);
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
 
-const gid = () => "r" + Date.now() + Math.random().toString(36).slice(2, 5);
-
-// Compress image to reduce API token usage
-const compressImage = (b64, maxW = 1200, quality = 0.6) => new Promise((resolve) => {
-  const img = new Image();
-  img.onload = () => {
-    const canvas = document.createElement("canvas");
-    let w = img.width, h = img.height;
-    if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0, w, h);
-    resolve(canvas.toDataURL("image/jpeg", quality));
-  };
-  img.onerror = () => resolve(b64);
-  img.src = b64;
-});
-
-// Delay helper for rate limit retry
-const delay = ms => new Promise(r => setTimeout(r, ms));
-
-// API call with auto-retry on rate limit (429)
-const apiFetch = async (body, apiKey, setStep, retries = 3) => {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify(body),
+const apiFetch=async(body,apiKey,setStep,retries=3)=>{
+  for(let a=0;a<retries;a++){
+    const res=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify(body),
     });
-    if (res.ok) return await res.json();
-    if (res.status === 401) throw new Error("Invalid API key. Go to Settings (⚙️) and update your key.");
-    if (res.status === 429 && attempt < retries - 1) {
-      const wait = Math.min(30 + attempt * 20, 60);
-      setStep(`Rate limited — waiting ${wait}s before retry (${attempt + 1}/${retries})...`);
-      await delay(wait * 1000);
-      setStep("Retrying...");
+    if(res.ok)return await res.json();
+    if(res.status===401)throw new Error("Invalid API key. Update in Settings ⚙️");
+    if(res.status===429&&a<retries-1){
+      const w=30+a*15;
+      setStep(`Rate limited — retrying in ${w}s (${a+1}/${retries})...`);
+      await delay(w*1000);
       continue;
     }
-    const errBody = await res.text();
-    throw new Error(`API ${res.status}: ${errBody.slice(0, 200)}`);
+    const e=await res.text();
+    throw new Error(`API ${res.status}: ${e.slice(0,200)}`);
   }
 };
 
-const C = {
-  bg: "#06080c", card: "#0e1219", card2: "#151c28", border: "#1c2536",
-  accent: "#3b8bff", text: "#c8d3e5", dim: "#3e4f6a",
-  red: "#ef4444", yellow: "#eab308", green: "#22c55e",
-  redBg: "#1c0a0a", yellowBg: "#1c1808", greenBg: "#081c0e",
-  redBdr: "#7f1d1d", yellowBdr: "#713f12", greenBdr: "#14532d",
+// Parse Excel/CSV to text
+const parseFile=(file)=>new Promise((resolve,reject)=>{
+  const reader=new FileReader();
+  reader.onload=(e)=>{
+    try{
+      const data=new Uint8Array(e.target.result);
+      const wb=XLSX.read(data,{type:"array",cellDates:true});
+      let allText="";
+      wb.SheetNames.forEach(name=>{
+        const ws=wb.Sheets[name];
+        const csv=XLSX.utils.sheet_to_csv(ws,{blankrows:false});
+        if(csv.trim()){
+          allText+=`\n--- Sheet: ${name} ---\n${csv}\n`;
+        }
+      });
+      resolve(allText.trim());
+    }catch(err){reject(err)}
+  };
+  reader.onerror=()=>reject(new Error("Failed to read file"));
+  reader.readAsArrayBuffer(file);
+});
+
+const C={
+  bg:"#06080c",card:"#0e1219",card2:"#151c28",border:"#1c2536",
+  accent:"#3b8bff",text:"#c8d3e5",dim:"#3e4f6a",
+  red:"#ef4444",yellow:"#eab308",green:"#22c55e",
+  redBg:"#1c0a0a",yellowBg:"#1c1808",greenBg:"#081c0e",
+  redBdr:"#7f1d1d",yellowBdr:"#713f12",greenBdr:"#14532d",
 };
-const gradeC = { A: C.green, B: "#4ade80", C: C.yellow, D: "#fb923c", F: C.red };
-const statusC = { ok: C.green, watch: C.yellow, alert: C.red };
-const dayC = { green: C.green, yellow: C.yellow, red: C.red };
+const gradeC={A:C.green,B:"#4ade80",C:C.yellow,D:"#fb923c",F:C.red};
+const statusC={ok:C.green,watch:C.yellow,alert:C.red};
+const dayC={green:C.green,yellow:C.yellow,red:C.red};
 
-function App() {
-  const [view, setView] = useState("setup");
-  const [tab, setTab] = useState("schedules");
-  const [imgs, setImgs] = useState({});
-  const [dealImgs, setDealImgs] = useState([]);
-  const [dealNotes, setDealNotes] = useState(LS.get("dealNotes", ""));
-  const [rules, setRules] = useState(LS.get("rules", DEFAULT_RULES.map(r => ({ ...r, on: true }))));
-  const [newCat, setNewCat] = useState("Custom");
-  const [newRule, setNewRule] = useState("");
-  const [weekOf, setWeekOf] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - d.getDay() + 1);
-    return d.toISOString().split("T")[0];
+function App(){
+  const[view,setView]=useState("setup");
+  const[tab,setTab]=useState("schedules");
+  const[files,setFiles]=useState({}); // {storeName: [{name, text, rows}]}
+  const[dealImgs,setDealImgs]=useState([]);
+  const[dealNotes,setDealNotes]=useState(LS.get("dealNotes",""));
+  const[rules,setRules]=useState(LS.get("rules",DEFAULT_RULES.map(r=>({...r,on:true}))));
+  const[newCat,setNewCat]=useState("Custom");
+  const[newRule,setNewRule]=useState("");
+  const[weekOf,setWeekOf]=useState(()=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+1);return d.toISOString().split("T")[0]});
+  const[sel,setSel]=useState(STORES.map(()=>true));
+  const[loading,setLoading]=useState(false);
+  const[step,setStep]=useState("");
+  const[result,setResult]=useState(null);
+  const[expandedStore,setExpandedStore]=useState(null);
+  const[apiKey,setApiKey]=useState(LS.get("apiKey",""));
+  const[showSettings,setShowSettings]=useState(false);
+  const[apiKeyVisible,setApiKeyVisible]=useState(false);
+  const[preview,setPreview]=useState(null); // {store, text}
+  const fileRefs=useRef({});
+  const dealRef=useRef(null);
+
+  useEffect(()=>{LS.set("rules",rules)},[rules]);
+  useEffect(()=>{LS.set("dealNotes",dealNotes)},[dealNotes]);
+  useEffect(()=>{LS.set("apiKey",apiKey)},[apiKey]);
+
+  const handleFile=async(store,e)=>{
+    const fileList=Array.from(e.target.files);
+    for(const f of fileList){
+      try{
+        const text=await parseFile(f);
+        const rows=text.split("\n").length;
+        setFiles(p=>({...p,[store]:[...(p[store]||[]),{name:f.name,text,rows}]}));
+      }catch(err){
+        alert(`Error reading ${f.name}: ${err.message}`);
+      }
+    }
+    e.target.value="";
+  };
+
+  const pickFile=(store)=>{
+    if(!fileRefs.current[store]){
+      fileRefs.current[store]=document.createElement("input");
+      fileRefs.current[store].type="file";
+      fileRefs.current[store].accept=".xlsx,.xls,.csv,.tsv";
+      fileRefs.current[store].multiple=true;
+      fileRefs.current[store].addEventListener("change",e=>handleFile(store,e));
+    }
+    fileRefs.current[store].click();
+  };
+
+  const compressImage=(b64,maxW=600,q=0.3)=>new Promise(r=>{
+    const img=new Image();
+    img.onload=()=>{const c=document.createElement("canvas");let w=img.width,h=img.height;if(w>maxW){h=Math.round(h*maxW/w);w=maxW}c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);r(c.toDataURL("image/jpeg",q))};
+    img.onerror=()=>r(b64);img.src=b64;
   });
-  const [sel, setSel] = useState(STORES.map(() => true));
-  const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState("");
-  const [result, setResult] = useState(null);
-  const [expandedStore, setExpandedStore] = useState(null);
-  const [apiKey, setApiKey] = useState(LS.get("apiKey", ""));
-  const [showSettings, setShowSettings] = useState(false);
-  const [apiKeyVisible, setApiKeyVisible] = useState(false);
-  const refs = useRef({});
-  const dealRef = useRef(null);
 
-  // Persist
-  useEffect(() => { LS.set("rules", rules); }, [rules]);
-  useEffect(() => { LS.set("dealNotes", dealNotes); }, [dealNotes]);
-  useEffect(() => { LS.set("apiKey", apiKey); }, [apiKey]);
-
-  const upload = (store, e) => {
-    Array.from(e.target.files).forEach(f => {
-      const r = new FileReader();
-      r.onload = ev => setImgs(p => ({ ...p, [store]: [...(p[store] || []), { b64: ev.target.result, name: f.name }] }));
-      r.readAsDataURL(f);
-    });
-    e.target.value = "";
+  const uploadDeal=(e)=>{
+    Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>setDealImgs(p=>[...p,{b64:ev.target.result,name:f.name}]);r.readAsDataURL(f)});
+    e.target.value="";
   };
-  const uploadDeal = e => {
-    Array.from(e.target.files).forEach(f => {
-      const r = new FileReader();
-      r.onload = ev => setDealImgs(p => [...p, { b64: ev.target.result, name: f.name }]);
-      r.readAsDataURL(f);
-    });
-    e.target.value = "";
-  };
-  const pickFile = (store) => {
-    if (!refs.current[store]) {
-      refs.current[store] = document.createElement("input");
-      refs.current[store].type = "file"; refs.current[store].accept = "image/*"; refs.current[store].multiple = true;
-      refs.current[store].addEventListener("change", e => upload(store, e));
-    }
-    refs.current[store].click();
-  };
-  const pickDeal = () => {
-    if (!dealRef.current) {
-      dealRef.current = document.createElement("input");
-      dealRef.current.type = "file"; dealRef.current.accept = "image/*"; dealRef.current.multiple = true;
-      dealRef.current.addEventListener("change", uploadDeal);
-    }
+  const pickDeal=()=>{
+    if(!dealRef.current){dealRef.current=document.createElement("input");dealRef.current.type="file";dealRef.current.accept="image/*,.xlsx,.xls,.csv";dealRef.current.multiple=true;dealRef.current.addEventListener("change",uploadDeal)}
     dealRef.current.click();
   };
 
-  const imgCount = STORES.reduce((s, st, i) => s + (sel[i] ? (imgs[st]?.length || 0) : 0), 0);
+  const fileCount=STORES.reduce((s,st,i)=>s+(sel[i]?(files[st]?.length||0):0),0);
 
-  const runAudit = async () => {
-    if (!apiKey) { setShowSettings(true); return; }
-    setLoading(true); setResult(null); setView("results");
+  const runAudit=async()=>{
+    if(!apiKey){setShowSettings(true);return}
+    setLoading(true);setResult(null);setView("results");
 
-    try {
-      const activeRules = rules.filter(r => r.on).map(r => `[${r.cat}] ${r.rule}`).join("\n");
+    try{
+      const activeRules=rules.filter(r=>r.on).map(r=>`[${r.cat}] ${r.rule}`).join("\n");
 
-      // Collect selected stores with images
-      const storesToAudit = [];
-      for (const [si, st] of STORES.entries()) {
-        if (!sel[si] || !(imgs[st]?.length)) continue;
-        storesToAudit.push(st);
-      }
-      if (storesToAudit.length === 0) { setResult({ error: "Upload at least one schedule screenshot first." }); setLoading(false); return; }
+      // Build schedule text for all stores
+      const storeData=[];
+      STORES.forEach((st,si)=>{
+        if(!sel[si]||!(files[st]?.length))return;
+        let text=`\n===== STORE: ${st} =====\n`;
+        files[st].forEach(f=>{text+=`\n--- File: ${f.name} ---\n${f.text}\n`});
+        storeData.push({name:st,text});
+      });
 
-      // Step 1: External context (text only — tiny token count)
+      if(storeData.length===0){setResult({error:"Upload at least one schedule file."});setLoading(false);return}
+
+      // All schedule data as one text block
+      const allScheduleText=storeData.map(s=>s.text).join("\n");
+
+      // Step 1: External context
       setStep("Checking Calgary weather, holidays, sports & payments...");
-      let ext = "";
-      try {
-        const cd = await apiFetch({
-          model: "claude-sonnet-4-20250514", max_tokens: 1000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: `Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather - any snow/extreme cold?\n2) Alberta stat holidays that week?\n3) Calgary sports events?\n4) Government payment dates?\n5) Notable events?\nBe very concise, max 3 lines each.` }],
-        }, apiKey, setStep);
-        ext = cd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("\n") || "";
-      } catch (err) {
-        if (err.message.includes("Invalid API key")) { setResult({ error: err.message }); setLoading(false); return; }
-        ext = "External context unavailable.";
+      let ext="";
+      try{
+        const cd=await apiFetch({
+          model:"claude-sonnet-4-20250514",max_tokens:1000,
+          tools:[{type:"web_search_20250305",name:"web_search"}],
+          messages:[{role:"user",content:`Today is ${new Date().toLocaleDateString("en-CA")}. Week of ${weekOf}. For Calgary, Alberta concisely list:\n1) Weather - any snow/extreme cold?\n2) Alberta stat holidays that week?\n3) Calgary sports events?\n4) Government payment dates?\n5) Notable events?\nBe very concise.`}],
+        },apiKey,setStep);
+        ext=cd.content?.map(c=>c.type==="text"?c.text:"").filter(Boolean).join("\n")||"";
+      }catch(err){
+        if(err.message.includes("Invalid API key")){setResult({error:err.message});setLoading(false);return}
+        ext="External context unavailable.";
       }
 
-      // Compress deal images once
-      const dealContentParts = [];
-      for (let idx = 0; idx < dealImgs.length; idx++) {
-        const compressed = await compressImage(dealImgs[idx].b64, 600, 0.3);
-        const d = compressed.split(",")[1];
-        dealContentParts.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
-        dealContentParts.push({ type: "text", text: `[Deal: ${dealImgs[idx].name}]` });
-      }
+      // Step 2: Analyze all schedules in one call (text is tiny compared to images!)
+      setStep(`Auditing ${storeData.length} stores...`);
 
-      // Step 2: Audit each store ONE AT A TIME with pauses
-      const allStoreResults = [];
-      const allAlerts = [];
-      const externalFactors = [];
-
-      const singleStoreSys = (storeName, isFirst) => `You are a Pizza Hut scheduling audit AI for Calgary, Alberta. Analyze the schedule screenshot(s) for ${storeName} and return JSON.
+      const sys=`You are a Pizza Hut scheduling audit AI for Calgary, Alberta. You receive schedule data extracted from Excel/CSV files. Analyze the data and return a VISUAL AUDIT DASHBOARD as JSON.
 
 RULES:
 ${activeRules}
 
-${isFirst ? `EXTERNAL CONTEXT (week of ${weekOf}):\n${ext}` : ""}
-${isFirst && dealNotes ? `DEAL NOTES: ${dealNotes}` : ""}
+EXTERNAL CONTEXT (week of ${weekOf}):
+${ext}
 
-KEY CONTEXT: Salaried employees cover SM requirement. Doughmaster is NOT a separate role — need min 2 people in morning for dough.
+${dealNotes?`DEAL NOTES: ${dealNotes}`:""}
+
+KEY CONTEXT:
+- Salaried employees cover SM requirement — no separate SM needed if salary is on shift
+- Doughmaster is NOT a separate role — dough made by production, SM, or salaried. Just need min 2 people in morning.
+- The schedule data comes from Excel exports. Column headers may include employee names, roles/positions, and days with shift times.
+- Parse the shift times to determine AM/PM coverage, overlaps, and staffing density.
 
 RESPOND ONLY WITH THIS JSON (no markdown, no backticks):
 {
-  ${isFirst ? `"alerts": [ { "level": "critical|warning", "icon": "emoji", "title": "max 8 words", "detail": "max 12 words", "store": "${storeName} or ALL" } ],` : ""}
-  ${isFirst ? `"external": [ { "type": "weather|holiday|sports|payments|deals", "icon": "emoji", "label": "2-3 words", "status": "ok|watch|alert", "note": "max 8 words" } ],` : ""}
-  "store": {
-    "name": "${storeName}",
-    "grade": "A|B|C|D|F",
-    "criticals": 0, "warnings": 0, "passes": 0,
-    "dayGrid": { "Mon":"green|yellow|red","Tue":"green|yellow|red","Wed":"green|yellow|red","Thu":"green|yellow|red","Fri":"green|yellow|red","Sat":"green|yellow|red","Sun":"green|yellow|red" },
-    "findings": [ { "sev": "critical|warning|pass", "day": "Mon-Sun|General", "msg": "max 12 words", "fix": "max 10 words or empty" } ]
-  }
-}
-Keep text SHORT. Red=critical, yellow=warning, green=good. Worst problems first.`;
-
-      for (let si = 0; si < storesToAudit.length; si++) {
-        const st = storesToAudit[si];
-        const isFirst = si === 0;
-
-        // Wait between stores to avoid rate limit
-        if (si > 0) {
-          const waitSec = 65;
-          for (let w = waitSec; w > 0; w--) {
-            setStep(`Rate limit cooldown: ${w}s... then auditing ${st} (${si + 1}/${storesToAudit.length})`);
-            await delay(1000);
-          }
-        }
-
-        // Compress this store's images aggressively
-        setStep(`Compressing ${st} images (${si + 1}/${storesToAudit.length})...`);
-        const storeImgParts = [];
-        for (let idx = 0; idx < imgs[st].length; idx++) {
-          const compressed = await compressImage(imgs[st][idx].b64, 800, 0.35);
-          const d = compressed.split(",")[1];
-          storeImgParts.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } });
-          storeImgParts.push({ type: "text", text: `[${st} schedule image ${idx + 1}]` });
-        }
-
-        setStep(`AI auditing ${st} (${si + 1}/${storesToAudit.length})...`);
-        try {
-          const userContent = [
-            ...storeImgParts,
-            ...(isFirst ? dealContentParts : []),
-            { type: "text", text: `Audit ${st} schedule for week of ${weekOf}. Return ONLY the JSON.` }
-          ];
-
-          const rd = await apiFetch({
-            model: "claude-sonnet-4-20250514", max_tokens: 2000,
-            system: singleStoreSys(st, isFirst),
-            messages: [{ role: "user", content: userContent }],
-          }, apiKey, setStep);
-
-          const txt = rd.content?.map(c => c.type === "text" ? c.text : "").filter(Boolean).join("") || "";
-          const clean = txt.replace(/```json|```/g, "").trim();
-          try {
-            const parsed = JSON.parse(clean);
-            if (parsed.store) allStoreResults.push(parsed.store);
-            if (parsed.alerts) allAlerts.push(...parsed.alerts);
-            if (parsed.external) externalFactors.push(...parsed.external);
-          } catch {
-            allStoreResults.push({
-              name: st, grade: "?", criticals: 0, warnings: 1, passes: 0,
-              dayGrid: { Mon:"yellow",Tue:"yellow",Wed:"yellow",Thu:"yellow",Fri:"yellow",Sat:"yellow",Sun:"yellow" },
-              findings: [{ sev: "warning", day: "General", msg: "Could not parse AI response for this store", fix: "Re-run audit" }]
-            });
-          }
-        } catch (err) {
-          allStoreResults.push({
-            name: st, grade: "?", criticals: 0, warnings: 1, passes: 0,
-            dayGrid: { Mon:"yellow",Tue:"yellow",Wed:"yellow",Thu:"yellow",Fri:"yellow",Sat:"yellow",Sun:"yellow" },
-            findings: [{ sev: "warning", day: "General", msg: `API error: ${err.message.slice(0,50)}`, fix: "Re-run audit" }]
-          });
-        }
-      }
-
-      // Merge into final dashboard
-      const totalC = allStoreResults.reduce((s, st) => s + (st.criticals || 0), 0);
-      const totalW = allStoreResults.reduce((s, st) => s + (st.warnings || 0), 0);
-      // Add store-specific alerts from later stores
-      for (let si = 1; si < allStoreResults.length; si++) {
-        const st = allStoreResults[si];
-        if (st.criticals > 0) allAlerts.push({ level: "critical", icon: "🚨", title: `${st.name} has ${st.criticals} critical issues`, detail: "Expand store card for details", store: st.name });
-      }
-
-      setResult({ data: {
-        alerts: allAlerts.sort((a, b) => a.level === "critical" ? -1 : 1),
-        external: externalFactors,
-        stores: allStoreResults,
-        summary: `Audited ${storesToAudit.length} stores: ${totalC} critical issues, ${totalW} warnings found.`
-      }});
-
-    } catch (err) {
-      if (!result?.error) setResult({ error: err.message });
+  "alerts": [
+    { "level": "critical|warning", "icon": "emoji", "title": "max 8 words", "detail": "max 12 words", "store": "StoreName or ALL" }
+  ],
+  "external": [
+    { "type": "weather|holiday|sports|payments|deals", "icon": "emoji", "label": "2-3 words", "status": "ok|watch|alert", "note": "max 8 words" }
+  ],
+  "stores": [
+    {
+      "name": "StoreName",
+      "grade": "A|B|C|D|F",
+      "criticals": 0, "warnings": 0, "passes": 0,
+      "dayGrid": { "Mon":"green|yellow|red","Tue":"green|yellow|red","Wed":"green|yellow|red","Thu":"green|yellow|red","Fri":"green|yellow|red","Sat":"green|yellow|red","Sun":"green|yellow|red" },
+      "findings": [
+        { "sev": "critical|warning|pass", "day": "Mon|Tue|Wed|Thu|Fri|Sat|Sun|General", "msg": "max 12 words", "fix": "max 10 words or empty" }
+      ]
     }
-    setLoading(false); setStep("");
+  ],
+  "summary": "1 sentence max 20 words"
+}
+
+Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.`;
+
+      const rd=await apiFetch({
+        model:"claude-sonnet-4-20250514",max_tokens:4000,system:sys,
+        messages:[{role:"user",content:`Here is the schedule data for week of ${weekOf}:\n\n${allScheduleText}\n\nAudit all stores and return the JSON dashboard.`}],
+      },apiKey,setStep);
+
+      const txt=rd.content?.map(c=>c.type==="text"?c.text:"").filter(Boolean).join("")||"";
+      const clean=txt.replace(/```json|```/g,"").trim();
+      try{setResult({data:JSON.parse(clean)})}
+      catch{setResult({raw:txt})}
+    }catch(err){
+      if(!result?.error)setResult({error:err.message});
+    }
+    setLoading(false);setStep("");
   };
 
-  // ============ SETTINGS MODAL ============
-  const SettingsModal = () => (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={() => setShowSettings(false)}>
-      <div className="fade-in" onClick={e => e.stopPropagation()} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, width: "100%", maxWidth: 420 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 800, color: "#fff", margin: 0 }}>⚙️ Settings</h2>
-          <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", color: C.dim, fontSize: 20, cursor: "pointer" }}>×</button>
+  // Settings Modal
+  const SettingsModal=()=>(
+    <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowSettings(false)}>
+      <div className="fade-in" onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:24,width:"100%",maxWidth:420}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <h2 style={{fontSize:16,fontWeight:800,color:"#fff",margin:0}}>⚙️ Settings</h2>
+          <button onClick={()=>setShowSettings(false)} style={{background:"none",border:"none",color:C.dim,fontSize:20,cursor:"pointer"}}>×</button>
         </div>
-
-        <label style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6, fontWeight: 700 }}>Anthropic API Key</label>
-        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-          <input
-            type={apiKeyVisible ? "text" : "password"}
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder="sk-ant-api03-..."
-            style={{ flex: 1, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: "10px 12px", fontSize: 12, fontFamily: "inherit" }}
-          />
-          <button onClick={() => setApiKeyVisible(!apiKeyVisible)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.dim, padding: "8px 10px", fontSize: 14, cursor: "pointer" }}>
-            {apiKeyVisible ? "🙈" : "👁️"}
+        <label style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.08em",display:"block",marginBottom:6,fontWeight:700}}>Anthropic API Key</label>
+        <div style={{display:"flex",gap:6,marginBottom:8}}>
+          <input type={apiKeyVisible?"text":"password"} value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="sk-ant-api03-..."
+            style={{flex:1,background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"10px 12px",fontSize:12,fontFamily:"inherit"}} />
+          <button onClick={()=>setApiKeyVisible(!apiKeyVisible)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,padding:"8px 10px",fontSize:14,cursor:"pointer"}}>
+            {apiKeyVisible?"🙈":"👁️"}
           </button>
         </div>
-        <p style={{ fontSize: 10, color: C.dim, lineHeight: 1.5, marginBottom: 16 }}>
-          Your key is stored locally in this browser only. Never shared. Get one at{" "}
-          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{ color: C.accent }}>console.anthropic.com</a>
+        <p style={{fontSize:10,color:C.dim,lineHeight:1.5,marginBottom:16}}>
+          Stored locally only. <a href="https://console.anthropic.com/settings/keys" target="_blank" style={{color:C.accent}}>Get API key</a>
         </p>
-
-        <label style={{ fontSize: 10, color: C.dim, textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6, fontWeight: 700 }}>Data</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { if (confirm("Reset all rules to defaults?")) { setRules(DEFAULT_RULES.map(r => ({ ...r, on: true }))); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${C.yellowBdr}`, background: C.yellowBg, color: C.yellow, fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-            Reset Rules
-          </button>
-          <button onClick={() => { if (confirm("Clear ALL saved data?")) { localStorage.clear(); location.reload(); } }} style={{ flex: 1, padding: "8px", borderRadius: 8, border: `1px solid ${C.redBdr}`, background: C.redBg, color: C.red, fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-            Clear All Data
-          </button>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>{if(confirm("Reset rules?"))setRules(DEFAULT_RULES.map(r=>({...r,on:true})))}} style={{flex:1,padding:8,borderRadius:8,border:`1px solid ${C.yellowBdr}`,background:C.yellowBg,color:C.yellow,fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Reset Rules</button>
+          <button onClick={()=>{if(confirm("Clear all?")){localStorage.clear();location.reload()}}} style={{flex:1,padding:8,borderRadius:8,border:`1px solid ${C.redBdr}`,background:C.redBg,color:C.red,fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Clear All</button>
         </div>
-
-        <div style={{ marginTop: 16, padding: "10px 12px", background: C.card2, borderRadius: 8, fontSize: 10, color: C.dim, lineHeight: 1.5 }}>
-          <strong style={{ color: C.text }}>How it works:</strong> This tool sends your schedule screenshots to Claude AI via the Anthropic API. Images are auto-compressed to reduce token usage. It also searches the web for Calgary weather, holidays, sports events, and payment dates. All processing happens between your browser and the API directly.
+        <div style={{marginTop:16,padding:"10px 12px",background:C.greenBg,border:`1px solid ${C.greenBdr}`,borderRadius:8,fontSize:10,color:"#6ee7b7",lineHeight:1.5}}>
+          <strong>Excel mode:</strong> Schedule data is parsed locally and sent as text — uses ~95% fewer tokens than images. Works on Tier 1 ($5 plan).
         </div>
-        <div style={{ marginTop: 8, padding: "10px 12px", background: C.yellowBg, border: `1px solid ${C.yellowBdr}`, borderRadius: 8, fontSize: 10, color: "#fde68a", lineHeight: 1.5 }}>
-          <strong>Rate limit tip:</strong> If you hit rate limits (429 errors), the tool auto-retries with a wait. To avoid this, audit 2–3 stores at a time instead of all 5 at once.
-        </div>
-
-        <button onClick={() => setShowSettings(false)} style={{ width: "100%", marginTop: 16, padding: "10px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-          Done
-        </button>
+        <button onClick={()=>setShowSettings(false)} style={{width:"100%",marginTop:16,padding:10,borderRadius:10,border:"none",background:C.accent,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Done</button>
       </div>
     </div>
   );
 
-  // ============ RESULTS VIEW ============
-  if (view === "results") {
-    const d = result?.data;
-    const totalCrit = d?.stores?.reduce((s, st) => s + (st.criticals || 0), 0) || 0;
-    const totalWarn = d?.stores?.reduce((s, st) => s + (st.warnings || 0), 0) || 0;
-    const totalPass = d?.stores?.reduce((s, st) => s + (st.passes || 0), 0) || 0;
+  // Preview Modal
+  const PreviewModal=()=>preview&&(
+    <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setPreview(null)}>
+      <div className="fade-in" onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:20,width:"100%",maxWidth:600,maxHeight:"80vh",display:"flex",flexDirection:"column"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>{preview.store} — Parsed Data</span>
+          <button onClick={()=>setPreview(null)} style={{background:"none",border:"none",color:C.dim,fontSize:20,cursor:"pointer"}}>×</button>
+        </div>
+        <pre style={{flex:1,overflow:"auto",fontSize:10,color:C.text,background:C.card2,borderRadius:8,padding:12,lineHeight:1.5,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{preview.text}</pre>
+      </div>
+    </div>
+  );
 
-    return (
-      <div style={{ background: C.bg, minHeight: "100vh", minHeight: "100dvh", color: C.text }}>
-        {showSettings && <SettingsModal />}
-        {/* Top bar */}
-        <div style={{ background: C.card, borderBottom: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 50 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button onClick={() => { setView("setup"); setResult(null); }} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.accent, padding: "5px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>← Edit</button>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>Week of {weekOf}</span>
+  // ============ RESULTS ============
+  if(view==="results"){
+    const d=result?.data;
+    const totalCrit=d?.stores?.reduce((s,st)=>s+(st.criticals||0),0)||0;
+    const totalWarn=d?.stores?.reduce((s,st)=>s+(st.warnings||0),0)||0;
+    const totalPass=d?.stores?.reduce((s,st)=>s+(st.passes||0),0)||0;
+
+    return(
+      <div style={{background:C.bg,minHeight:"100dvh",color:C.text}}>
+        {showSettings&&<SettingsModal/>}
+        <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:50}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <button onClick={()=>{setView("setup");setResult(null)}} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.accent,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>← Edit</button>
+            <span style={{fontSize:13,fontWeight:700}}>Week of {weekOf}</span>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => setShowSettings(true)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.dim, padding: "5px 8px", fontSize: 12, cursor: "pointer" }}>⚙️</button>
-            <button onClick={() => { setView("setup"); setTimeout(runAudit, 200); }} disabled={loading} style={{ background: C.accent + "18", border: `1px solid ${C.accent}30`, borderRadius: 8, color: C.accent, padding: "5px 12px", fontSize: 10, cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 600 }}>↻ Re-run</button>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setShowSettings(true)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,padding:"5px 8px",fontSize:12,cursor:"pointer"}}>⚙️</button>
+            <button onClick={()=>{setView("setup");setTimeout(runAudit,200)}} disabled={loading} style={{background:C.accent+"18",border:`1px solid ${C.accent}30`,borderRadius:8,color:C.accent,padding:"5px 12px",fontSize:10,cursor:loading?"default":"pointer",fontFamily:"inherit",fontWeight:600}}>↻ Re-run</button>
           </div>
         </div>
 
-        {/* Loading state */}
-        {loading && (
-          <div className="fade-in" style={{ padding: "60px 20px", textAlign: "center" }}>
-            <div style={{ width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin .8s linear infinite", margin: "0 auto 16px" }} />
-            <div style={{ fontSize: 13, color: C.text, fontWeight: 600, marginBottom: 6 }}>{step || "Analyzing..."}</div>
-            <div style={{ width: "60%", height: 3, background: C.card, borderRadius: 2, overflow: "hidden", margin: "12px auto" }}>
-              <div style={{ height: "100%", background: `linear-gradient(90deg, ${C.accent}, ${C.green})`, borderRadius: 2, animation: "pulse 1.5s ease-in-out infinite" }} />
-            </div>
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 8 }}>This usually takes 15–30 seconds</div>
+        {loading&&(
+          <div className="fade-in" style={{padding:"60px 20px",textAlign:"center"}}>
+            <div style={{width:40,height:40,border:`3px solid ${C.border}`,borderTopColor:C.accent,borderRadius:"50%",animation:"spin .8s linear infinite",margin:"0 auto 16px"}}/>
+            <div style={{fontSize:13,color:C.text,fontWeight:600,marginBottom:6}}>{step||"Analyzing..."}</div>
+            <div style={{fontSize:10,color:C.dim,marginTop:8}}>Usually takes 10–20 seconds</div>
           </div>
         )}
 
-        {/* Error */}
-        {result?.error && (
-          <div className="fade-in" style={{ margin: 14, padding: 16, background: C.redBg, border: `2px solid ${C.redBdr}`, borderRadius: 12, color: C.red, fontSize: 13, lineHeight: 1.5 }}>
-            <strong>Error:</strong> {result.error}
-          </div>
-        )}
-        {result?.raw && (
-          <div className="fade-in" style={{ margin: 14, padding: 14, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, fontSize: 11, whiteSpace: "pre-wrap", maxHeight: 500, overflow: "auto", color: C.text }}>{result.raw}</div>
-        )}
+        {result?.error&&<div className="fade-in" style={{margin:14,padding:16,background:C.redBg,border:`2px solid ${C.redBdr}`,borderRadius:12,color:C.red,fontSize:13,lineHeight:1.5}}><strong>Error:</strong> {result.error}</div>}
+        {result?.raw&&<div className="fade-in" style={{margin:14,padding:14,background:C.card,border:`1px solid ${C.border}`,borderRadius:12,fontSize:11,whiteSpace:"pre-wrap",maxHeight:500,overflow:"auto",color:C.text}}>{result.raw}</div>}
 
-        {/* Dashboard */}
-        {d && (
-          <div className="fade-in" style={{ padding: "12px 14px", maxWidth: 860, margin: "0 auto" }}>
+        {d&&(
+          <div className="fade-in" style={{padding:"12px 14px",maxWidth:860,margin:"0 auto"}}>
             {/* Scoreboard */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {[
-                { n: totalCrit, label: "Critical", color: C.red, bg: C.redBg, active: totalCrit > 0 },
-                { n: totalWarn, label: "Warnings", color: C.yellow, bg: C.yellowBg, active: totalWarn > 0 },
-                { n: totalPass, label: "Passed", color: C.green, bg: C.card, active: false },
-              ].map((b, i) => (
-                <div key={i} style={{ flex: 1, background: b.active ? b.bg : C.card, border: `1px solid ${b.active ? b.color + "50" : C.border}`, borderRadius: 12, padding: "12px 14px", textAlign: "center" }}>
-                  <div style={{ fontSize: 28, fontWeight: 900, color: b.active ? b.color : (b.n > 0 ? b.color : C.green), textShadow: b.active ? `0 0 20px ${b.color}60` : "none" }}>{b.n}</div>
-                  <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", letterSpacing: "0.1em", marginTop: 2 }}>{b.label}</div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              {[{n:totalCrit,label:"Critical",color:C.red,bg:C.redBg,active:totalCrit>0},{n:totalWarn,label:"Warnings",color:C.yellow,bg:C.yellowBg,active:totalWarn>0},{n:totalPass,label:"Passed",color:C.green,bg:C.card,active:false}].map((b,i)=>(
+                <div key={i} style={{flex:1,background:b.active?b.bg:C.card,border:`1px solid ${b.active?b.color+"50":C.border}`,borderRadius:12,padding:"12px 14px",textAlign:"center"}}>
+                  <div style={{fontSize:28,fontWeight:900,color:b.active?b.color:(b.n>0?b.color:C.green),textShadow:b.active?`0 0 20px ${b.color}60`:"none"}}>{b.n}</div>
+                  <div style={{fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginTop:2}}>{b.label}</div>
                 </div>
               ))}
             </div>
 
             {/* Red Flags */}
-            {d.alerts?.filter(a => a.level === "critical").length > 0 && (
-              <div style={{ background: `linear-gradient(135deg, ${C.redBg}, #120505)`, border: `2px solid ${C.red}50`, borderRadius: 14, padding: "14px 16px", marginBottom: 12, boxShadow: `0 0 30px ${C.red}15, inset 0 0 30px ${C.red}08` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: C.red, boxShadow: `0 0 12px ${C.red}`, animation: "blink 1.2s infinite" }} />
-                  <span style={{ fontSize: 14, fontWeight: 900, color: C.red, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                    Red Flags ({d.alerts.filter(a => a.level === "critical").length})
-                  </span>
+            {d.alerts?.filter(a=>a.level==="critical").length>0&&(
+              <div style={{background:`linear-gradient(135deg,${C.redBg},#120505)`,border:`2px solid ${C.red}50`,borderRadius:14,padding:"14px 16px",marginBottom:12,boxShadow:`0 0 30px ${C.red}15`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <div style={{width:12,height:12,borderRadius:"50%",background:C.red,boxShadow:`0 0 12px ${C.red}`,animation:"blink 1.2s infinite"}}/>
+                  <span style={{fontSize:14,fontWeight:900,color:C.red,textTransform:"uppercase",letterSpacing:"0.06em"}}>Red Flags ({d.alerts.filter(a=>a.level==="critical").length})</span>
                 </div>
-                {d.alerts.filter(a => a.level === "critical").map((a, i) => (
-                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", background: "#200a0a", borderRadius: 10, marginBottom: i < d.alerts.filter(x => x.level === "critical").length - 1 ? 6 : 0, border: `1px solid ${C.redBdr}` }}>
-                    <span style={{ fontSize: 24, flexShrink: 0 }}>{a.icon || "🚨"}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "#fca5a5", lineHeight: 1.2 }}>{a.title}</div>
-                      <div style={{ fontSize: 11, color: "#d48787", marginTop: 2 }}>{a.detail}</div>
+                {d.alerts.filter(a=>a.level==="critical").map((a,i)=>(
+                  <div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"10px 12px",background:"#200a0a",borderRadius:10,marginBottom:i<d.alerts.filter(x=>x.level==="critical").length-1?6:0,border:`1px solid ${C.redBdr}`}}>
+                    <span style={{fontSize:24,flexShrink:0}}>{a.icon||"🚨"}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:800,color:"#fca5a5",lineHeight:1.2}}>{a.title}</div>
+                      <div style={{fontSize:11,color:"#d48787",marginTop:2}}>{a.detail}</div>
                     </div>
-                    {a.store !== "ALL" && <span style={{ fontSize: 9, background: C.redBdr, color: "#fca5a5", padding: "3px 8px", borderRadius: 6, fontWeight: 700, flexShrink: 0 }}>{a.store}</span>}
+                    {a.store!=="ALL"&&<span style={{fontSize:9,background:C.redBdr,color:"#fca5a5",padding:"3px 8px",borderRadius:6,fontWeight:700,flexShrink:0}}>{a.store}</span>}
                   </div>
                 ))}
               </div>
             )}
 
             {/* Warnings */}
-            {d.alerts?.filter(a => a.level === "warning").length > 0 && (
-              <div style={{ background: C.yellowBg, border: `1px solid ${C.yellowBdr}`, borderRadius: 14, padding: "12px 16px", marginBottom: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: C.yellow, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  ⚠️ Warnings ({d.alerts.filter(a => a.level === "warning").length})
-                </div>
-                {d.alerts.filter(a => a.level === "warning").map((a, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: i > 0 ? `1px solid ${C.yellowBdr}` : "none" }}>
-                    <span style={{ fontSize: 18 }}>{a.icon || "⚠️"}</span>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fde68a" }}>{a.title} </span>
-                      <span style={{ fontSize: 11, color: "#c9a210" }}>{a.detail}</span>
-                    </div>
-                    {a.store !== "ALL" && <span style={{ fontSize: 9, background: C.yellowBdr, color: "#fde68a", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>{a.store}</span>}
+            {d.alerts?.filter(a=>a.level==="warning").length>0&&(
+              <div style={{background:C.yellowBg,border:`1px solid ${C.yellowBdr}`,borderRadius:14,padding:"12px 16px",marginBottom:12}}>
+                <div style={{fontSize:12,fontWeight:800,color:C.yellow,marginBottom:8,textTransform:"uppercase"}}>⚠️ Warnings ({d.alerts.filter(a=>a.level==="warning").length})</div>
+                {d.alerts.filter(a=>a.level==="warning").map((a,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"6px 0",borderTop:i>0?`1px solid ${C.yellowBdr}`:"none"}}>
+                    <span style={{fontSize:18}}>{a.icon||"⚠️"}</span>
+                    <div style={{flex:1}}><span style={{fontSize:12,fontWeight:700,color:"#fde68a"}}>{a.title} </span><span style={{fontSize:11,color:"#c9a210"}}>{a.detail}</span></div>
+                    {a.store!=="ALL"&&<span style={{fontSize:9,background:C.yellowBdr,color:"#fde68a",padding:"2px 6px",borderRadius:4,fontWeight:600}}>{a.store}</span>}
                   </div>
                 ))}
               </div>
             )}
 
-            {/* External Factors */}
-            {d.external?.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 6, marginBottom: 12 }}>
-                {d.external.map((e, i) => (
-                  <div key={i} style={{ background: C.card, border: `1px solid ${statusC[e.status]}25`, borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8, borderLeft: `3px solid ${statusC[e.status]}` }}>
-                    <span style={{ fontSize: 20 }}>{e.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: statusC[e.status] }}>{e.label}</div>
-                      <div style={{ fontSize: 9, color: C.dim, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.note}</div>
+            {/* External */}
+            {d.external?.length>0&&(
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:6,marginBottom:12}}>
+                {d.external.map((e,i)=>(
+                  <div key={i} style={{background:C.card,border:`1px solid ${statusC[e.status]}25`,borderRadius:10,padding:"10px 12px",display:"flex",alignItems:"center",gap:8,borderLeft:`3px solid ${statusC[e.status]}`}}>
+                    <span style={{fontSize:20}}>{e.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:700,color:statusC[e.status]}}>{e.label}</div>
+                      <div style={{fontSize:9,color:C.dim,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.note}</div>
                     </div>
                   </div>
                 ))}
@@ -493,78 +407,74 @@ Keep text SHORT. Red=critical, yellow=warning, green=good. Worst problems first.
             )}
 
             {/* Store Cards */}
-            {d.stores?.map((st, si) => {
-              const open = expandedStore === si;
-              const crits = st.findings?.filter(f => f.sev === "critical") || [];
-              const warns = st.findings?.filter(f => f.sev === "warning") || [];
-              const pass = st.findings?.filter(f => f.sev === "pass") || [];
-              return (
-                <div key={si} style={{ background: C.card, borderRadius: 14, marginBottom: 10, overflow: "hidden", border: `1px solid ${st.criticals > 0 ? C.red + "35" : C.border}`, boxShadow: st.criticals > 0 ? `0 0 24px ${C.red}08` : "none" }}>
-                  <div onClick={() => setExpandedStore(open ? null : si)} style={{ padding: "12px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ width: 50, height: 50, borderRadius: 12, background: `${gradeC[st.grade] || C.dim}12`, border: `2px solid ${gradeC[st.grade] || C.dim}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 900, color: gradeC[st.grade] || C.dim, flexShrink: 0 }}>{st.grade}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6, color: "#fff" }}>{st.name}</div>
-                      <div style={{ display: "flex", gap: 3 }}>
-                        {DAYS.map(day => {
-                          const color = st.dayGrid?.[day] || "green";
-                          return (
-                            <div key={day} style={{ flex: 1, textAlign: "center" }}>
-                              <div style={{ fontSize: 7, color: C.dim, marginBottom: 2, fontWeight: 600 }}>{day}</div>
-                              <div style={{ height: 10, borderRadius: 3, background: dayC[color], boxShadow: color === "red" ? `0 0 8px ${C.red}50` : "none" }} />
-                            </div>
-                          );
-                        })}
+            {d.stores?.map((st,si)=>{
+              const open=expandedStore===si;
+              const crits=st.findings?.filter(f=>f.sev==="critical")||[];
+              const warns=st.findings?.filter(f=>f.sev==="warning")||[];
+              const pass=st.findings?.filter(f=>f.sev==="pass")||[];
+              return(
+                <div key={si} style={{background:C.card,borderRadius:14,marginBottom:10,overflow:"hidden",border:`1px solid ${st.criticals>0?C.red+"35":C.border}`,boxShadow:st.criticals>0?`0 0 24px ${C.red}08`:"none"}}>
+                  <div onClick={()=>setExpandedStore(open?null:si)} style={{padding:"12px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{width:50,height:50,borderRadius:12,background:`${gradeC[st.grade]||C.dim}12`,border:`2px solid ${gradeC[st.grade]||C.dim}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,fontWeight:900,color:gradeC[st.grade]||C.dim,flexShrink:0}}>{st.grade}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:14,fontWeight:800,marginBottom:6,color:"#fff"}}>{st.name}</div>
+                      <div style={{display:"flex",gap:3}}>
+                        {DAYS.map(day=>{const color=st.dayGrid?.[day]||"green";return(
+                          <div key={day} style={{flex:1,textAlign:"center"}}>
+                            <div style={{fontSize:7,color:C.dim,marginBottom:2,fontWeight:600}}>{day}</div>
+                            <div style={{height:10,borderRadius:3,background:dayC[color],boxShadow:color==="red"?`0 0 8px ${C.red}50`:"none"}}/>
+                          </div>
+                        )})}
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-                      {st.criticals > 0 && <div style={{ background: C.redBg, border: `1px solid ${C.redBdr}`, borderRadius: 8, padding: "4px 8px", display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: C.red, boxShadow: `0 0 6px ${C.red}` }} /><span style={{ fontSize: 13, fontWeight: 900, color: C.red }}>{st.criticals}</span></div>}
-                      {st.warnings > 0 && <div style={{ background: C.yellowBg, border: `1px solid ${C.yellowBdr}`, borderRadius: 8, padding: "4px 8px", display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: C.yellow }} /><span style={{ fontSize: 13, fontWeight: 800, color: C.yellow }}>{st.warnings}</span></div>}
-                      <span style={{ fontSize: 14, color: C.dim }}>{open ? "▲" : "▼"}</span>
+                    <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                      {st.criticals>0&&<div style={{background:C.redBg,border:`1px solid ${C.redBdr}`,borderRadius:8,padding:"4px 8px",display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:"50%",background:C.red,boxShadow:`0 0 6px ${C.red}`}}/><span style={{fontSize:13,fontWeight:900,color:C.red}}>{st.criticals}</span></div>}
+                      {st.warnings>0&&<div style={{background:C.yellowBg,border:`1px solid ${C.yellowBdr}`,borderRadius:8,padding:"4px 8px",display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:"50%",background:C.yellow}}/><span style={{fontSize:13,fontWeight:800,color:C.yellow}}>{st.warnings}</span></div>}
+                      <span style={{fontSize:14,color:C.dim}}>{open?"▲":"▼"}</span>
                     </div>
                   </div>
-                  {open && (
-                    <div className="fade-in" style={{ borderTop: `1px solid ${C.border}`, padding: "10px 16px 14px" }}>
-                      {crits.map((f, fi) => (
-                        <div key={"c" + fi} style={{ display: "flex", gap: 10, padding: "8px 10px", marginBottom: 4, background: C.redBg, borderRadius: 8, border: `1px solid ${C.redBdr}`, alignItems: "flex-start" }}>
-                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: C.red, marginTop: 3, flexShrink: 0, boxShadow: `0 0 8px ${C.red}` }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 2 }}>
-                              <span style={{ fontSize: 8, background: C.redBdr, color: "#fca5a5", padding: "1px 5px", borderRadius: 3, fontWeight: 800, textTransform: "uppercase" }}>Critical</span>
-                              <span style={{ fontSize: 8, background: C.card2, color: C.dim, padding: "1px 5px", borderRadius: 3 }}>{f.day}</span>
+                  {open&&(
+                    <div className="fade-in" style={{borderTop:`1px solid ${C.border}`,padding:"10px 16px 14px"}}>
+                      {crits.map((f,fi)=>(
+                        <div key={"c"+fi} style={{display:"flex",gap:10,padding:"8px 10px",marginBottom:4,background:C.redBg,borderRadius:8,border:`1px solid ${C.redBdr}`,alignItems:"flex-start"}}>
+                          <div style={{width:10,height:10,borderRadius:"50%",background:C.red,marginTop:3,flexShrink:0,boxShadow:`0 0 8px ${C.red}`}}/>
+                          <div style={{flex:1}}>
+                            <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:2}}>
+                              <span style={{fontSize:8,background:C.redBdr,color:"#fca5a5",padding:"1px 5px",borderRadius:3,fontWeight:800,textTransform:"uppercase"}}>Critical</span>
+                              <span style={{fontSize:8,background:C.card2,color:C.dim,padding:"1px 5px",borderRadius:3}}>{f.day}</span>
                             </div>
-                            <div style={{ fontSize: 12, color: "#fca5a5", fontWeight: 700 }}>{f.msg}</div>
-                            {f.fix && <div style={{ fontSize: 11, color: C.yellow, marginTop: 2 }}>→ {f.fix}</div>}
+                            <div style={{fontSize:12,color:"#fca5a5",fontWeight:700}}>{f.msg}</div>
+                            {f.fix&&<div style={{fontSize:11,color:C.yellow,marginTop:2}}>→ {f.fix}</div>}
                           </div>
                         </div>
                       ))}
-                      {warns.map((f, fi) => (
-                        <div key={"w" + fi} style={{ display: "flex", gap: 10, padding: "8px 10px", marginBottom: 4, background: C.yellowBg + "80", borderRadius: 8, border: `1px solid ${C.yellowBdr}60`, alignItems: "flex-start" }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.yellow, marginTop: 4, flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", gap: 4, alignItems: "center", marginBottom: 2 }}>
-                              <span style={{ fontSize: 8, background: C.yellowBdr, color: "#fde68a", padding: "1px 5px", borderRadius: 3, fontWeight: 700 }}>Warning</span>
-                              <span style={{ fontSize: 8, background: C.card2, color: C.dim, padding: "1px 5px", borderRadius: 3 }}>{f.day}</span>
+                      {warns.map((f,fi)=>(
+                        <div key={"w"+fi} style={{display:"flex",gap:10,padding:"8px 10px",marginBottom:4,background:C.yellowBg+"80",borderRadius:8,border:`1px solid ${C.yellowBdr}60`,alignItems:"flex-start"}}>
+                          <div style={{width:8,height:8,borderRadius:"50%",background:C.yellow,marginTop:4,flexShrink:0}}/>
+                          <div style={{flex:1}}>
+                            <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:2}}>
+                              <span style={{fontSize:8,background:C.yellowBdr,color:"#fde68a",padding:"1px 5px",borderRadius:3,fontWeight:700}}>Warning</span>
+                              <span style={{fontSize:8,background:C.card2,color:C.dim,padding:"1px 5px",borderRadius:3}}>{f.day}</span>
                             </div>
-                            <div style={{ fontSize: 12, color: "#fde68a" }}>{f.msg}</div>
-                            {f.fix && <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>→ {f.fix}</div>}
+                            <div style={{fontSize:12,color:"#fde68a"}}>{f.msg}</div>
+                            {f.fix&&<div style={{fontSize:11,color:C.dim,marginTop:2}}>→ {f.fix}</div>}
                           </div>
                         </div>
                       ))}
-                      {pass.length > 0 && (
-                        <div style={{ marginTop: 4, padding: "8px 10px", background: C.greenBg, borderRadius: 8, border: `1px solid ${C.greenBdr}` }}>
-                          <span style={{ fontSize: 10, color: C.green, fontWeight: 700 }}>✅ {pass.length} passed</span>
-                          <span style={{ fontSize: 10, color: "#6ee7b7", marginLeft: 8 }}>{pass.map(f => f.msg).join(" · ")}</span>
+                      {pass.length>0&&(
+                        <div style={{marginTop:4,padding:"8px 10px",background:C.greenBg,borderRadius:8,border:`1px solid ${C.greenBdr}`}}>
+                          <span style={{fontSize:10,color:C.green,fontWeight:700}}>✅ {pass.length} passed</span>
+                          <span style={{fontSize:10,color:"#6ee7b7",marginLeft:8}}>{pass.map(f=>f.msg).join(" · ")}</span>
                         </div>
                       )}
                     </div>
                   )}
                 </div>
-              );
-            })}
+              )})}
 
-            {d.summary && (
-              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 16px", fontSize: 12, color: C.dim, marginTop: 4 }}>
-                <span style={{ color: C.accent, fontWeight: 700 }}>Summary: </span>{d.summary}
+            {d.summary&&(
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 16px",fontSize:12,color:C.dim,marginTop:4}}>
+                <span style={{color:C.accent,fontWeight:700}}>Summary: </span>{d.summary}
               </div>
             )}
           </div>
@@ -573,133 +483,144 @@ Keep text SHORT. Red=critical, yellow=warning, green=good. Worst problems first.
     );
   }
 
-  // ============ SETUP VIEW ============
-  return (
-    <div style={{ background: C.bg, minHeight: "100vh", minHeight: "100dvh", color: C.text }}>
-      {showSettings && <SettingsModal />}
-      {/* Header */}
-      <div style={{ background: "linear-gradient(135deg, #0a0e16, #141c2a)", borderBottom: `1px solid ${C.border}`, padding: "16px 18px 12px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, #dc2626, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🍕</div>
+  // ============ SETUP ============
+  return(
+    <div style={{background:C.bg,minHeight:"100dvh",color:C.text}}>
+      {showSettings&&<SettingsModal/>}
+      {preview&&<PreviewModal/>}
+
+      <div style={{background:"linear-gradient(135deg,#0a0e16,#141c2a)",borderBottom:`1px solid ${C.border}`,padding:"16px 18px 12px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#dc2626,#f97316)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🍕</div>
             <div>
-              <h1 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#fff" }}>Schedule Audit</h1>
-              <p style={{ margin: 0, fontSize: 9, color: C.dim, letterSpacing: "0.1em", textTransform: "uppercase" }}>AC Region · Calgary</p>
+              <h1 style={{margin:0,fontSize:16,fontWeight:800,color:"#fff"}}>Schedule Audit</h1>
+              <p style={{margin:0,fontSize:9,color:C.dim,letterSpacing:"0.1em",textTransform:"uppercase"}}>AC Region · Calgary · Excel Mode</p>
             </div>
           </div>
-          <button onClick={() => setShowSettings(true)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.dim, padding: "6px 10px", fontSize: 13, cursor: "pointer" }}>⚙️</button>
+          <button onClick={()=>setShowSettings(true)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,padding:"6px 10px",fontSize:13,cursor:"pointer"}}>⚙️</button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-          <span style={{ fontSize: 10, color: C.dim, textTransform: "uppercase" }}>Week of</span>
-          <input type="date" value={weekOf} onChange={e => setWeekOf(e.target.value)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "5px 8px", fontSize: 12, fontFamily: "inherit" }} />
-          {!apiKey && (
-            <span onClick={() => setShowSettings(true)} style={{ fontSize: 9, background: C.redBg, border: `1px solid ${C.redBdr}`, color: C.red, padding: "3px 8px", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>
-              ⚠️ Set API Key
-            </span>
-          )}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10}}>
+          <span style={{fontSize:10,color:C.dim,textTransform:"uppercase"}}>Week of</span>
+          <input type="date" value={weekOf} onChange={e=>setWeekOf(e.target.value)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,padding:"5px 8px",fontSize:12,fontFamily:"inherit"}}/>
+          {!apiKey&&<span onClick={()=>setShowSettings(true)} style={{fontSize:9,background:C.redBg,border:`1px solid ${C.redBdr}`,color:C.red,padding:"3px 8px",borderRadius:6,cursor:"pointer",fontWeight:700}}>⚠️ Set API Key</span>}
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, background: C.card, position: "sticky", top: 0, zIndex: 50 }}>
-        {["schedules", "deals", "rules"].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            flex: 1, padding: "10px 4px", border: "none", cursor: "pointer",
-            background: tab === t ? C.card2 : "transparent",
-            borderBottom: tab === t ? `2px solid ${C.accent}` : "2px solid transparent",
-            color: tab === t ? C.accent : C.dim, fontSize: 10, fontWeight: 700,
-            fontFamily: "inherit", textTransform: "uppercase", letterSpacing: "0.04em",
+      <div style={{display:"flex",borderBottom:`1px solid ${C.border}`,background:C.card,position:"sticky",top:0,zIndex:50}}>
+        {["schedules","deals","rules"].map(t=>(
+          <button key={t} onClick={()=>setTab(t)} style={{
+            flex:1,padding:"10px 4px",border:"none",cursor:"pointer",
+            background:tab===t?C.card2:"transparent",
+            borderBottom:tab===t?`2px solid ${C.accent}`:"2px solid transparent",
+            color:tab===t?C.accent:C.dim,fontSize:10,fontWeight:700,
+            fontFamily:"inherit",textTransform:"uppercase",letterSpacing:"0.04em",
           }}>
-            {t === "schedules" ? `📋 Schedules (${imgCount})` : t === "deals" ? `🏷️ Deals (${dealImgs.length})` : `⚙️ Rules (${rules.filter(r => r.on).length})`}
+            {t==="schedules"?`📊 Schedules (${fileCount})`:t==="deals"?`🏷️ Deals (${dealImgs.length})`:` ⚙️ Rules (${rules.filter(r=>r.on).length})`}
           </button>
         ))}
       </div>
 
-      <div style={{ padding: "12px 16px", maxWidth: 800, margin: "0 auto", paddingBottom: 80 }}>
-        {tab === "schedules" && STORES.map((store, si) => (
-          <div key={store} style={{ background: C.card, border: `1px solid ${sel[si] ? C.border : C.card}`, borderRadius: 10, marginBottom: 6, opacity: sel[si] ? 1 : 0.35, overflow: "hidden", transition: "opacity .2s" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div onClick={() => setSel(p => p.map((v, i) => i === si ? !v : v))} style={{ width: 18, height: 18, borderRadius: 4, cursor: "pointer", border: `2px solid ${sel[si] ? C.accent : C.dim}`, background: sel[si] ? C.accent + "20" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: C.accent, fontSize: 11 }}>{sel[si] && "✓"}</div>
-                <span style={{ fontSize: 12, fontWeight: 700 }}>{store}</span>
-                {(imgs[store]?.length || 0) > 0 && <span style={{ fontSize: 9, background: C.greenBg, color: C.green, padding: "1px 6px", borderRadius: 6 }}>{imgs[store].length}</span>}
-              </div>
-              <button onClick={() => pickFile(store)} disabled={!sel[si]} style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: C.card2, color: C.accent, fontSize: 10, fontFamily: "inherit", cursor: sel[si] ? "pointer" : "default", fontWeight: 600 }}>+ Upload</button>
-            </div>
-            {imgs[store]?.length > 0 && (
-              <div style={{ padding: "4px 12px 8px", display: "flex", gap: 5, flexWrap: "wrap" }}>
-                {imgs[store].map((img, idx) => (
-                  <div key={idx} style={{ position: "relative" }}>
-                    <img src={img.b64} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, border: `1px solid ${C.border}` }} />
-                    <div onClick={() => setImgs(p => ({ ...p, [store]: p[store].filter((_, i) => i !== idx) }))} style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: 7, background: C.red, color: "#fff", fontSize: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-
-        {tab === "deals" && (
+      <div style={{padding:"12px 16px",maxWidth:800,margin:"0 auto",paddingBottom:80}}>
+        {/* SCHEDULES */}
+        {tab==="schedules"&&(
           <div>
-            <div onClick={pickDeal} style={{ width: "100%", padding: 12, borderRadius: 10, border: `2px dashed ${C.border}`, background: C.card, color: C.accent, fontSize: 12, cursor: "pointer", fontWeight: 600, textAlign: "center", marginBottom: 8, boxSizing: "border-box", fontFamily: "inherit" }}>📸 Upload Deal Screenshots</div>
-            {dealImgs.length > 0 && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, padding: 8, background: C.card, borderRadius: 10, border: `1px solid ${C.border}` }}>
-                {dealImgs.map((img, idx) => (
-                  <div key={idx} style={{ position: "relative" }}>
-                    <img src={img.b64} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6 }} />
-                    <div onClick={() => setDealImgs(p => p.filter((_, i) => i !== idx))} style={{ position: "absolute", top: -4, right: -4, width: 14, height: 14, borderRadius: 7, background: C.red, color: "#fff", fontSize: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>×</div>
+            <div style={{fontSize:11,color:C.dim,marginBottom:12,padding:"8px 10px",background:C.card,borderRadius:8,border:`1px solid ${C.border}`,lineHeight:1.5}}>
+              📊 Upload <strong style={{color:C.text}}>Excel (.xlsx) or CSV</strong> schedule exports for each store. Data is parsed locally — no images needed.
+            </div>
+            {STORES.map((store,si)=>(
+              <div key={store} style={{background:C.card,border:`1px solid ${sel[si]?C.border:C.card}`,borderRadius:10,marginBottom:6,opacity:sel[si]?1:0.35,overflow:"hidden",transition:"opacity .2s"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 12px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div onClick={()=>setSel(p=>p.map((v,i)=>i===si?!v:v))} style={{width:18,height:18,borderRadius:4,cursor:"pointer",border:`2px solid ${sel[si]?C.accent:C.dim}`,background:sel[si]?C.accent+"20":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:C.accent,fontSize:11}}>{sel[si]&&"✓"}</div>
+                    <span style={{fontSize:12,fontWeight:700}}>{store}</span>
+                    {(files[store]?.length||0)>0&&<span style={{fontSize:9,background:C.greenBg,color:C.green,padding:"1px 6px",borderRadius:6}}>{files[store].length} file{files[store].length>1?"s":""}</span>}
                   </div>
-                ))}
+                  <button onClick={()=>pickFile(store)} disabled={!sel[si]} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.accent,fontSize:10,fontFamily:"inherit",cursor:sel[si]?"pointer":"default",fontWeight:600}}>+ Upload .xlsx</button>
+                </div>
+                {files[store]?.length>0&&(
+                  <div style={{padding:"4px 12px 8px"}}>
+                    {files[store].map((f,idx)=>(
+                      <div key={idx} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderTop:idx>0?`1px solid ${C.border}`:"none"}}>
+                        <span style={{fontSize:16}}>📄</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:11,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</div>
+                          <div style={{fontSize:9,color:C.dim}}>{f.rows} rows parsed</div>
+                        </div>
+                        <button onClick={()=>setPreview({store,text:f.text})} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:4,color:C.accent,fontSize:9,padding:"2px 6px",cursor:"pointer",fontFamily:"inherit"}}>Preview</button>
+                        <div onClick={()=>setFiles(p=>({...p,[store]:p[store].filter((_,i)=>i!==idx)}))} style={{color:C.red,cursor:"pointer",fontSize:14,flexShrink:0}}>×</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            <textarea value={dealNotes} onChange={e => setDealNotes(e.target.value)} placeholder="e.g. BOGO Mar 25 – Apr 7, 5.5.5 weekends only..." rows={3} style={{ width: "100%", background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, padding: 10, fontSize: 11, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+            ))}
           </div>
         )}
 
-        {tab === "rules" && (
+        {/* DEALS */}
+        {tab==="deals"&&(
           <div>
-            <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 10, marginBottom: 10 }}>
-              <div style={{ fontSize: 9, color: C.dim, textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>+ Add Rule</div>
-              <select value={newCat} onChange={e => setNewCat(e.target.value)} style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "4px 6px", fontSize: 10, fontFamily: "inherit", marginBottom: 4, display: "block" }}>
-                {["Staffing", "Overlap", "Coverage", "Holiday", "Weather", "Events", "Deals", "Custom"].map(c => <option key={c}>{c}</option>)}
+            <div onClick={pickDeal} style={{width:"100%",padding:12,borderRadius:10,border:`2px dashed ${C.border}`,background:C.card,color:C.accent,fontSize:12,cursor:"pointer",fontWeight:600,textAlign:"center",marginBottom:8,boxSizing:"border-box",fontFamily:"inherit"}}>📸 Upload Deal Screenshots</div>
+            {dealImgs.length>0&&(
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10,padding:8,background:C.card,borderRadius:10,border:`1px solid ${C.border}`}}>
+                {dealImgs.map((img,idx)=>(
+                  <div key={idx} style={{position:"relative"}}>
+                    <img src={img.b64} style={{width:56,height:56,objectFit:"cover",borderRadius:6}}/>
+                    <div onClick={()=>setDealImgs(p=>p.filter((_,i)=>i!==idx))} style={{position:"absolute",top:-4,right:-4,width:14,height:14,borderRadius:7,background:C.red,color:"#fff",fontSize:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>×</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea value={dealNotes} onChange={e=>setDealNotes(e.target.value)} placeholder="e.g. BOGO Mar 25 – Apr 7, 5.5.5 weekends only..." rows={3} style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:10,fontSize:11,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box"}}/>
+          </div>
+        )}
+
+        {/* RULES */}
+        {tab==="rules"&&(
+          <div>
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:10,marginBottom:10}}>
+              <div style={{fontSize:9,color:C.dim,textTransform:"uppercase",marginBottom:6,fontWeight:700}}>+ Add Rule</div>
+              <select value={newCat} onChange={e=>setNewCat(e.target.value)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,padding:"4px 6px",fontSize:10,fontFamily:"inherit",marginBottom:4,display:"block"}}>
+                {["Staffing","Overlap","Coverage","Holiday","Weather","Events","Deals","Custom"].map(c=><option key={c}>{c}</option>)}
               </select>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={newRule} onChange={e => setNewRule(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newRule.trim()) { setRules(p => [...p, { id: gid(), cat: newCat, rule: newRule.trim(), on: true }]); setNewRule(""); } }} placeholder="Rule description..." style={{ flex: 1, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text, padding: "6px 8px", fontSize: 11, fontFamily: "inherit" }} />
-                <button onClick={() => { if (newRule.trim()) { setRules(p => [...p, { id: gid(), cat: newCat, rule: newRule.trim(), on: true }]); setNewRule(""); } }} style={{ padding: "6px 10px", borderRadius: 6, border: "none", background: C.greenBg, color: C.green, fontSize: 10, fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>Add</button>
+              <div style={{display:"flex",gap:6}}>
+                <input value={newRule} onChange={e=>setNewRule(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newRule.trim()){setRules(p=>[...p,{id:gid(),cat:newCat,rule:newRule.trim(),on:true}]);setNewRule("")}}} placeholder="Rule description..." style={{flex:1,background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,padding:"6px 8px",fontSize:11,fontFamily:"inherit"}}/>
+                <button onClick={()=>{if(newRule.trim()){setRules(p=>[...p,{id:gid(),cat:newCat,rule:newRule.trim(),on:true}]);setNewRule("")}}} style={{padding:"6px 10px",borderRadius:6,border:"none",background:C.greenBg,color:C.green,fontSize:10,fontFamily:"inherit",cursor:"pointer",fontWeight:700}}>Add</button>
               </div>
             </div>
-            {rules.map(r => (
-              <div key={r.id} style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 10px", background: C.card, border: `1px solid ${r.on ? C.border : C.card}`, borderRadius: 8, marginBottom: 3, opacity: r.on ? 1 : 0.3, transition: "opacity .2s" }}>
-                <div onClick={() => setRules(p => p.map(x => x.id === r.id ? { ...x, on: !x.on } : x))} style={{ width: 16, height: 16, borderRadius: 4, cursor: "pointer", flexShrink: 0, border: `2px solid ${r.on ? C.green : C.dim}`, background: r.on ? C.greenBg : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: C.green, fontSize: 9 }}>{r.on && "✓"}</div>
-                <span style={{ fontSize: 8, color: C.dim, background: C.card2, padding: "1px 4px", borderRadius: 3, flexShrink: 0 }}>{r.cat}</span>
-                <span style={{ flex: 1, fontSize: 10, lineHeight: 1.3 }}>{r.rule}</span>
-                {!DEFAULT_RULES.find(d => d.id === r.id) && <div onClick={() => setRules(p => p.filter(x => x.id !== r.id))} style={{ color: C.red, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>×</div>}
+            {rules.map(r=>(
+              <div key={r.id} style={{display:"flex",gap:6,alignItems:"center",padding:"6px 10px",background:C.card,border:`1px solid ${r.on?C.border:C.card}`,borderRadius:8,marginBottom:3,opacity:r.on?1:0.3,transition:"opacity .2s"}}>
+                <div onClick={()=>setRules(p=>p.map(x=>x.id===r.id?{...x,on:!x.on}:x))} style={{width:16,height:16,borderRadius:4,cursor:"pointer",flexShrink:0,border:`2px solid ${r.on?C.green:C.dim}`,background:r.on?C.greenBg:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:C.green,fontSize:9}}>{r.on&&"✓"}</div>
+                <span style={{fontSize:8,color:C.dim,background:C.card2,padding:"1px 4px",borderRadius:3,flexShrink:0}}>{r.cat}</span>
+                <span style={{flex:1,fontSize:10,lineHeight:1.3}}>{r.rule}</span>
+                {!DEFAULT_RULES.find(d=>d.id===r.id)&&<div onClick={()=>setRules(p=>p.filter(x=>x.id!==r.id))} style={{color:C.red,cursor:"pointer",fontSize:13,flexShrink:0}}>×</div>}
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Floating audit button */}
-      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "10px 16px 14px", background: `linear-gradient(transparent, ${C.bg} 30%)`, zIndex: 40 }}>
-        <button onClick={runAudit} disabled={loading || imgCount === 0} style={{
-          width: "100%", maxWidth: 800, margin: "0 auto", display: "block",
-          padding: 14, borderRadius: 12, border: "none",
-          cursor: loading || imgCount === 0 ? "default" : "pointer",
-          background: loading ? C.card : imgCount === 0 ? C.card : "linear-gradient(135deg, #dc2626, #ea580c)",
-          color: loading || imgCount === 0 ? C.dim : "#fff",
-          fontSize: 14, fontWeight: 900, fontFamily: "inherit",
-          boxShadow: imgCount > 0 && !loading ? "0 4px 24px #dc262640" : "none",
-          letterSpacing: "0.02em",
+      {/* Float button */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 16px 14px",background:`linear-gradient(transparent,${C.bg} 30%)`,zIndex:40}}>
+        <button onClick={runAudit} disabled={loading||fileCount===0} style={{
+          width:"100%",maxWidth:800,margin:"0 auto",display:"block",
+          padding:14,borderRadius:12,border:"none",
+          cursor:loading||fileCount===0?"default":"pointer",
+          background:loading?C.card:fileCount===0?C.card:"linear-gradient(135deg,#dc2626,#ea580c)",
+          color:loading||fileCount===0?C.dim:"#fff",
+          fontSize:14,fontWeight:900,fontFamily:"inherit",
+          boxShadow:fileCount>0&&!loading?"0 4px 24px #dc262640":"none",
         }}>
-          {loading ? `⏳ ${step}` : imgCount === 0 ? "Upload schedules to start" : `🔍 Run Audit — ${STORES.filter((_, i) => sel[i]).length} Stores`}
+          {loading?`⏳ ${step}`:fileCount===0?"Upload schedule files to start":`🔍 Run Audit — ${STORES.filter((_,i)=>sel[i]).length} Stores`}
         </button>
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>

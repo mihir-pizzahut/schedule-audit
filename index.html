@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#06080c">
-<title>Schedule Audit · AC Region</title>
+<title>Schedule Audit</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍕</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
@@ -117,6 +117,7 @@ function App(){
   const[showSettings,setShowSettings]=useState(false);
   const[apiKeyVisible,setApiKeyVisible]=useState(false);
   const[showPreview,setShowPreview]=useState(false);
+  const[storeName,setStoreName]=useState("");
   const fileRef=useRef(null);
 
   useEffect(()=>{LS.set("rules",rules)},[rules]);
@@ -145,7 +146,7 @@ function App(){
 
   const runAudit=async()=>{
     if(!apiKey){setShowSettings(true);return}
-    if(!file){return}
+    if(!file||!storeName.trim()){return}
     setLoading(true);setResult(null);setView("results");
 
     try{
@@ -205,7 +206,7 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
 
       const rd=await apiFetch({
         model:"claude-sonnet-4-20250514",max_tokens:3000,system:sys,
-        messages:[{role:"user",content:`Schedule data for week of ${weekOf}:\n\n${file.text}\n\nAudit this schedule. Return ONLY the JSON.`}],
+        messages:[{role:"user",content:`Schedule data for ${storeName} store, week of ${weekOf}:\n\n${file.text}\n\nAudit this schedule. Return ONLY the JSON.`}],
       },apiKey,setStep);
 
       const txt=rd.content?.map(c=>c.type==="text"?c.text:"").filter(Boolean).join("")||"";
@@ -268,7 +269,7 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
         <div style={{background:C.card,borderBottom:`1px solid ${C.border}`,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:50}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <button onClick={()=>{setView("setup");setResult(null)}} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.accent,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>← Back</button>
-            <span style={{fontSize:13,fontWeight:700}}>Week of {weekOf}</span>
+            <span style={{fontSize:13,fontWeight:700}}>{storeName} · Week of {weekOf}</span>
           </div>
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>setShowSettings(true)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,padding:"5px 8px",fontSize:12,cursor:"pointer"}}>⚙️</button>
@@ -289,6 +290,15 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
 
         {d&&(
           <div className="fade-in" style={{padding:"12px 14px",maxWidth:860,margin:"0 auto"}}>
+
+            {/* Store Name Banner */}
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 18px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>{storeName}</div>
+                <div style={{fontSize:10,color:C.dim,marginTop:2}}>Week of {weekOf}</div>
+              </div>
+              <div style={{fontSize:28}}>🍕</div>
+            </div>
 
             {/* Grade + Scoreboard */}
             <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"stretch"}}>
@@ -413,7 +423,7 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
             )}
 
             {/* Audit another */}
-            <button onClick={()=>{setView("setup");setResult(null);setFile(null)}} style={{width:"100%",marginTop:12,padding:14,borderRadius:12,border:`1px solid ${C.border}`,background:C.card,color:C.accent,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+            <button onClick={()=>{setView("setup");setResult(null);setFile(null);setStoreName("")}} style={{width:"100%",marginTop:12,padding:14,borderRadius:12,border:`1px solid ${C.border}`,background:C.card,color:C.accent,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
               📊 Audit Another Store
             </button>
           </div>
@@ -426,7 +436,6 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
   return(
     <div style={{background:C.bg,minHeight:"100dvh",color:C.text}}>
       {showSettings&&<SettingsModal/>}
-      {showPreview&&file&&<PreviewModal/>}
 
       <div style={{background:"linear-gradient(135deg,#0a0e16,#141c2a)",borderBottom:`1px solid ${C.border}`,padding:"16px 18px 12px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -434,7 +443,6 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
             <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#dc2626,#f97316)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🍕</div>
             <div>
               <h1 style={{margin:0,fontSize:16,fontWeight:800,color:"#fff"}}>Schedule Audit</h1>
-              <p style={{margin:0,fontSize:9,color:C.dim,letterSpacing:"0.1em",textTransform:"uppercase"}}>AC Region · Calgary</p>
             </div>
           </div>
           <button onClick={()=>setShowSettings(true)} style={{background:C.card2,border:`1px solid ${C.border}`,borderRadius:8,color:C.dim,padding:"6px 10px",fontSize:13,cursor:"pointer"}}>⚙️</button>
@@ -456,12 +464,12 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
             color:tab===t?C.accent:C.dim,fontSize:10,fontWeight:700,
             fontFamily:"inherit",textTransform:"uppercase",letterSpacing:"0.04em",
           }}>
-            {t==="schedule"?`📊 Schedule${file?" ✓":""}`:t==="deals"?"🏷️ Deals":`⚙️ Rules (${rules.filter(r=>r.on).length})`}
+            {t==="schedule"?`📊 Schedule${file?" ✓":""}`:t==="deals"?"🏷️ Deals":`⚙️ Rules`}
           </button>
         ))}
       </div>
 
-      <div style={{padding:"12px 16px",maxWidth:800,margin:"0 auto",paddingBottom:80}}>
+      <div style={{padding:"12px 16px",maxWidth:800,margin:"0 auto",paddingBottom:20}}>
 
         {/* SCHEDULE */}
         {tab==="schedule"&&(
@@ -476,19 +484,34 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
                 <div style={{fontSize:11,color:C.dim}}>.xlsx · .xls · .csv</div>
               </div>
             ):(
-              <div style={{background:C.card,border:`1px solid ${C.greenBdr}`,borderRadius:14,padding:"16px 18px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                  <span style={{fontSize:24}}>📄</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
-                    <div style={{fontSize:10,color:C.green}}>{file.rows} rows parsed ✓</div>
+              <div>
+                <div style={{background:C.card,border:`1px solid ${C.greenBdr}`,borderRadius:14,padding:"14px 16px",marginBottom:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:22}}>📄</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
+                      <div style={{fontSize:10,color:C.green}}>{file.rows} rows parsed ✓</div>
+                    </div>
+                    <button onClick={()=>{setFile(null);setStoreName("");pickFile()}} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:C.card2,color:C.yellow,fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Replace</button>
                   </div>
                 </div>
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>setShowPreview(true)} style={{flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.card2,color:C.accent,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Preview Data</button>
-                  <button onClick={()=>{setFile(null);pickFile()}} style={{flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.card2,color:C.yellow,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>Replace File</button>
-                  <button onClick={()=>setFile(null)} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${C.redBdr}`,background:C.redBg,color:C.red,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>×</button>
+
+                <div style={{marginBottom:12}}>
+                  <label style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:6,fontWeight:700}}>Store Name</label>
+                  <input type="text" value={storeName} onChange={e=>setStoreName(e.target.value)} placeholder="e.g. McKnight, Crowfoot, Montgomery..."
+                    style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,padding:"10px 12px",fontSize:13,fontFamily:"inherit",boxSizing:"border-box"}}/>
                 </div>
+
+                <button onClick={runAudit} disabled={loading||!storeName.trim()} style={{
+                  width:"100%",padding:14,borderRadius:12,border:"none",
+                  cursor:loading||!storeName.trim()?"default":"pointer",
+                  background:loading?C.card:!storeName.trim()?C.card:"linear-gradient(135deg,#dc2626,#ea580c)",
+                  color:loading||!storeName.trim()?C.dim:"#fff",
+                  fontSize:14,fontWeight:900,fontFamily:"inherit",
+                  boxShadow:storeName.trim()&&!loading?"0 4px 24px #dc262640":"none",
+                }}>
+                  {loading?`⏳ ${step}`:!storeName.trim()?"Enter store name to audit":"🔍 Run Audit"}
+                </button>
               </div>
             )}
           </div>
@@ -527,20 +550,6 @@ Keep text SHORT. Worst problems first. Red=critical, yellow=warning, green=good.
         )}
       </div>
 
-      {/* Audit button */}
-      <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"10px 16px 14px",background:`linear-gradient(transparent,${C.bg} 30%)`,zIndex:40}}>
-        <button onClick={runAudit} disabled={loading||!file} style={{
-          width:"100%",maxWidth:800,margin:"0 auto",display:"block",
-          padding:14,borderRadius:12,border:"none",
-          cursor:loading||!file?"default":"pointer",
-          background:loading?C.card:!file?C.card:"linear-gradient(135deg,#dc2626,#ea580c)",
-          color:loading||!file?C.dim:"#fff",
-          fontSize:14,fontWeight:900,fontFamily:"inherit",
-          boxShadow:file&&!loading?"0 4px 24px #dc262640":"none",
-        }}>
-          {loading?`⏳ ${step}`:!file?"Upload a schedule file to start":"🔍 Run Audit"}
-        </button>
-      </div>
     </div>
   );
 }
